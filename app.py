@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 import re
 import pandas as pd
 import streamlit as st
@@ -11,7 +12,6 @@ st.set_page_config(
     page_icon="🚘",
 )
 
-# タイトルを小文字（控えめなサイズ）＋ 親しみやすい絵文字
 st.markdown(
     "### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🐻🐱"
 )
@@ -19,11 +19,16 @@ st.caption(
     "SEVs（特別輸入車両）早見表照合 ＋ ワンクリック即時コピー＆ROVER起動ツール"
 )
 
+# 固定ファイルパスの設定
+DATA_FILE_PATH = "AUS SEV早見表.xlsx"
 
-# 1. SEVデータ（Excel）の読み込み
+
+# 1. SEVデータ（Excel）の自動読み込み＆キャッシュ
 @st.cache_data
-def load_sev_data(file):
-  df = pd.read_excel(file, skiprows=1)
+def load_sev_data_default():
+  if not os.path.exists(DATA_FILE_PATH):
+    return None
+  df = pd.read_excel(DATA_FILE_PATH, skiprows=1)
   df.columns = [
       "SEV番号",
       "メーカー",
@@ -57,12 +62,7 @@ def parse_dmy(date_str):
 
 
 # --- サイドバー設定パネル ---
-st.sidebar.header("📁 1. データファイルの選択")
-uploaded_file = st.sidebar.file_uploader(
-    "「AUS SEV早見表.xlsx」を選択", type=["xlsx", "xls"]
-)
-
-st.sidebar.header("🔍 2. 車両情報の入力")
+st.sidebar.header("🔍 1. 車両情報の入力")
 input_query = (
     st.sidebar.text_input("型式 または 車種名", value="CKV36")
     .strip()
@@ -81,15 +81,39 @@ raws_permission = st.sidebar.checkbox(
     "提携RAWs工場が Model Report の利用ライセンスを保有している", value=True
 )
 
+st.sidebar.markdown("---")
+# 予備: 別のExcelで一時的に試したい場合用の手動アップローダーも残しておく
+uploaded_file = st.sidebar.file_uploader(
+    "（任意）別のSEV早見表を使用する場合", type=["xlsx", "xls"]
+)
+
 
 # --- メイン判定処理 ---
 if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
-  if not uploaded_file:
-    st.error("最初に左のサイドバーから「AUS SEV早見表.xlsx」をアップロードしてください。")
+  # データソースの決定（アップロードがあればそれを優先、なければリポジトリの固定ファイルを使用）
+  if uploaded_file:
+    sev_df = pd.read_excel(uploaded_file, skiprows=1)
+    sev_df.columns = [
+        "SEV番号",
+        "メーカー",
+        "車種名",
+        "カテゴリ",
+        "型式",
+        "製造開始年月",
+        "製造終了年月",
+        "有効期限",
+    ]
+  else:
+    sev_df = load_sev_data_default()
+
+  if sev_df is None:
+    st.error(
+        f"❌ リポジトリ内に `{DATA_FILE_PATH}`"
+        " が見つかりません。GitHubにファイルをアップロードするか、サイドバーから選択してください。"
+    )
   elif not input_query:
     st.warning("型式または車種名を入力してください。")
   else:
-    sev_df = load_sev_data(uploaded_file)
     target_date = datetime(build_year, build_month, 1)
     today = datetime.now()
 
@@ -117,7 +141,6 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
           "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
       )
 
-      # 該当した各SEVコードごとに個別のカードを生成
       for idx, row in matched.iterrows():
         sev_no = row["SEV番号"]
         make = row["メーカー"]
@@ -141,7 +164,6 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
         # 2. 有効期限チェック
         is_expired = expiry and expiry < today
 
-        # 各SEVコードごとのカード表示
         with st.expander(
             f"🚜 **SEV Code: {sev_no}** | {make} {model} ({model_code}) 🐾",
             expanded=True,
@@ -161,7 +183,6 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
             )
 
           with c2:
-            # 適合バッジの表示
             if not in_range:
               st.error("❌ 製造年月 対象外")
               st.caption(
@@ -177,7 +198,6 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
             else:
               st.success("✅ SEV適合 & 期間内 🎊")
 
-            # JavaScript連携ボタン（クリックでクリップボード書き込み ＋ ROVERを開く）
             html_button = f"""
             <button onclick="copyAndOpen()" style="
                 background-color: #FF4B4B;
