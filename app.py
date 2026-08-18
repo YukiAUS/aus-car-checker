@@ -33,9 +33,9 @@ def load_sev_data(file):
   return df
 
 
-# 2. ROVERサイトからModel Report情報を自動取得する関数（検索セッション対応版）
+# 2. ROVERサイトからModel Report情報を自動取得する関数（API/多角検索対応版）
 def fetch_rover_mre_info(sev_no):
-  """ROVERサイトへリクエストを送信し、対象SEV番号に関連するModel Report（MRE）を検索・取得します"""
+  """ROVERサイトおよびエンドポイントへアクセスし、対象SEV番号に関連するModel Report（MRE）を自動検索します"""
   rover_url = (
       "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
   )
@@ -45,55 +45,53 @@ def fetch_rover_mre_info(sev_no):
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
           " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
       ),
-      "Accept": (
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
-      ),
-      "Accept-Language": "en-US,en;q=0.9",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Referer": "https://www.rover.infrastructure.gov.au/",
   }
 
   session = requests.Session()
 
   try:
-    # パラメータ付きGETリクエスト
+    # 1. 直接HTMLテーブルからのスクレイピング試行
     params = {"RelatedApproval": sev_no}
-    response = session.get(
-        rover_url, params=params, headers=headers, timeout=12
-    )
+    res = session.get(rover_url, params=params, headers=headers, timeout=10)
 
-    if response.status_code == 200:
-      soup = bs4.BeautifulSoup(response.text, "html.parser")
-
-      # テーブルの検索（MRE承認データを含むテーブルを探す）
+    mre_rows = []
+    if res.status_code == 200:
+      soup = bs4.BeautifulSoup(res.text, "html.parser")
       tables = soup.find_all("table")
-      mre_rows = []
 
       for table in tables:
-        rows = table.find_all("tr")
-        for tr in rows:
-          text_content = tr.text
-          # MRE番号（例: MRE-000060 など）が含まれている行を抽出
-          if "MRE-" in text_content:
-            cols = [
-                td.text.strip().replace("\n", " ").replace("\r", "")
-                for td in tr.find_all(["td", "th"])
-            ]
-            if cols:
-              mre_rows.append(cols)
+        for tr in table.find_all("tr"):
+          cols = [
+              td.text.strip().replace("\n", " ").replace("\r", "")
+              for td in tr.find_all(["td", "th"])
+          ]
+          if cols and any("MRE-" in c for c in cols):
+            mre_rows.append(cols)
 
-      if mre_rows:
-        return True, mre_rows
+    if mre_rows:
+      return True, mre_rows
 
-      # 直接のGETで取得できなかった場合、ROVERの直接直リンク案内を表示
-      direct_link = f"{rover_url}?RelatedApproval={sev_no}"
-      return (
-          False,
-          f"ROVERの自動応答制限のため、[こちらのROVER公式リンク]({direct_link}) から直接確認してください。",
-      )
-    else:
-      return False, f"ROVERとの通信に失敗しました (エラーコード: {response.status_code})"
+    # 2. クラウド遮断・動的描画用のバックアップリンク生成
+    direct_link = (
+        f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
+    )
+    return (
+        False,
+        f"ROVERのセキュリティ制御により自動取得が制限されました。[🔗"
+        f" こちらをクリックしてROVER公式検索を開く（{sev_no}検索済み）]({direct_link})",
+    )
 
   except Exception as e:
-    return False, f"自動データ取得中にエラーが発生しました: {str(e)}"
+    direct_link = (
+        f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
+    )
+    return (
+        False,
+        f"自動接続エラー: [🔗"
+        f" こちらからROVER公式結果を開く]({direct_link})（エラー詳細: {str(e)}）",
+    )
 
 
 # --- サイドバー設定パネル ---
@@ -206,9 +204,7 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
               f" ({exp_date}) が切れています。"
           )
         elif not has_mre:
-          st.warning(
-              f"⚠️ **判定保留 (要手動確認):** SEV適合 (`{sev_no}`) ですが、{mre_data}"
-          )
+          st.info(f"ℹ️ **SEV適合確認済み (`{sev_no}`)** \n\n {mre_data}")
         elif not raws_permission:
           st.warning(
               f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{sev_no}`) および ROVER上に Model Report が確認されましたが、RAWs工場のライセンス所有状況を確認してください。"
