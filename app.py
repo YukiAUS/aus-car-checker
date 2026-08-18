@@ -33,39 +33,65 @@ def load_sev_data(file):
   return df
 
 
-# 2. ROVERサイトからModel Report情報を自動取得する関数
+# 2. ROVERサイトからModel Report情報を自動取得する関数（検索セッション対応版）
 def fetch_rover_mre_info(sev_no):
-  """ROVERサイトへアクセスし、対象SEV番号に関連するModel Report（MRE）を検索・取得します"""
+  """ROVERサイトへリクエストを送信し、対象SEV番号に関連するModel Report（MRE）を検索・取得します"""
   rover_url = (
       "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
   )
+
   headers = {
       "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-          " like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      )
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+      ),
+      "Accept": (
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+      ),
+      "Accept-Language": "en-US,en;q=0.9",
   }
 
+  session = requests.Session()
+
   try:
+    # パラメータ付きGETリクエスト
     params = {"RelatedApproval": sev_no}
-    response = requests.get(
-        rover_url, params=params, headers=headers, timeout=10
+    response = session.get(
+        rover_url, params=params, headers=headers, timeout=12
     )
 
     if response.status_code == 200:
       soup = bs4.BeautifulSoup(response.text, "html.parser")
-      table = soup.find("table")
-      if table:
-        rows = []
-        for tr in table.find_all("tr")[1:]:  # 1行目のヘッダーを除外
-          cols = [td.text.strip() for td in tr.find_all("td")]
-          if cols:
-            rows.append(cols)
-        if rows:
-          return True, rows
-      return False, "ROVER上に該当する Model Report（モデルレポート）は見つかりませんでした。"
+
+      # テーブルの検索（MRE承認データを含むテーブルを探す）
+      tables = soup.find_all("table")
+      mre_rows = []
+
+      for table in tables:
+        rows = table.find_all("tr")
+        for tr in rows:
+          text_content = tr.text
+          # MRE番号（例: MRE-000060 など）が含まれている行を抽出
+          if "MRE-" in text_content:
+            cols = [
+                td.text.strip().replace("\n", " ").replace("\r", "")
+                for td in tr.find_all(["td", "th"])
+            ]
+            if cols:
+              mre_rows.append(cols)
+
+      if mre_rows:
+        return True, mre_rows
+
+      # 直接のGETで取得できなかった場合、ROVERの直接直リンク案内を表示
+      direct_link = f"{rover_url}?RelatedApproval={sev_no}"
+      return (
+          False,
+          f"ROVERの自動応答制限のため、[こちらのROVER公式リンク]({direct_link}) から直接確認してください。",
+      )
     else:
       return False, f"ROVERとの通信に失敗しました (エラーコード: {response.status_code})"
+
   except Exception as e:
     return False, f"自動データ取得中にエラーが発生しました: {str(e)}"
 
@@ -181,14 +207,11 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
           )
         elif not has_mre:
           st.warning(
-              f"⚠️ **判定保留 (Model Report未発見):** SEV適合 (`{sev_no}`)"
-              " ですが、ROVER上で有効な Model Report"
-              f" が確認できませんでした。({mre_data})"
+              f"⚠️ **判定保留 (要手動確認):** SEV適合 (`{sev_no}`) ですが、{mre_data}"
           )
         elif not raws_permission:
           st.warning(
-              f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{sev_no}`)"
-              " および ROVER上に Model Report が確認されましたが、RAWs工場のライセンス所有状況を確認してください。"
+              f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{sev_no}`) および ROVER上に Model Report が確認されましたが、RAWs工場のライセンス所有状況を確認してください。"
           )
         else:
           st.success(
@@ -199,16 +222,7 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
         # 取得した Model Report テーブルの日本語表示
         if has_mre and isinstance(mre_data, list):
           st.markdown("**【ROVERから取得完了】関連する Model Report 一覧**")
-          mre_df = pd.DataFrame(
-              mre_data,
-              columns=[
-                  "承認番号 (Approval No)",
-                  "承認所有者 (Holder)",
-                  "メーカー / 車種名",
-                  "ステータス",
-                  "有効期限",
-              ],
-          )
+          mre_df = pd.DataFrame(mre_data)
           st.dataframe(mre_df, use_container_width=True)
 
         st.subheader("📋 一致したSEV登録データ")
