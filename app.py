@@ -1,6 +1,8 @@
 from datetime import datetime
 import re
+import bs4
 import pandas as pd
+import requests
 import streamlit as st
 
 # ページ全体の基本設定
@@ -11,7 +13,7 @@ st.set_page_config(
 )
 
 st.title("🚗 オーストラリア向け中古車輸出 適合判定システム")
-st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）照合ツール")
+st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）自動照合ツール")
 
 
 # 1. SEVデータ（Excel）の読み込み
@@ -48,6 +50,66 @@ def parse_dmy(date_str):
     return datetime.strptime(str(date_str).strip(), "%d/%m/%Y")
   except:
     return None
+
+
+# 2. ドロップダウン（select）入力＆ボタン実行を直接通信で自動再現する関数
+def fetch_rover_mre_by_select(sev_no):
+  """指定されたXPathの <select> ドロップダウン要素と <button> のフォーム送信処理を再現します"""
+  base_url = (
+      "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
+  )
+
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      ),
+      "Accept": (
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+      ),
+      "Referer": base_url,
+  }
+
+  session = requests.Session()
+
+  try:
+    # <select> への値選択とボタン押下（フォームパラメータ送信）を直接実行
+    params = {"RelatedApproval": sev_no}
+    res = session.get(base_url, params=params, headers=headers, timeout=12)
+
+    if res.status_code == 200:
+      soup = bs4.BeautifulSoup(res.text, "html.parser")
+      mre_rows = []
+
+      # テーブル要素から抽出
+      for tr in soup.find_all("tr"):
+        text = tr.text
+        if "MRE-" in text:
+          cols = [
+              td.text.strip().replace("\n", " ").replace("\r", "")
+              for td in tr.find_all(["td", "th"])
+          ]
+          if cols:
+            mre_rows.append(cols)
+
+      if mre_rows:
+        return True, mre_rows
+
+    # 公式ダイレクトURL（フォールバック用）
+    rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
+    return (
+        False,
+        f"ROVERポータルの動的通信により自動取得が制限されました。[🔗"
+        f" ROVER公式画面で {sev_no} を開く]({rover_link})",
+    )
+
+  except Exception as e:
+    rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
+    return (
+        False,
+        f"通信エラー: [🔗 ROVER公式画面で {sev_no}"
+        f" を開く]({rover_link})（詳細: {str(e)}）",
+    )
 
 
 # --- サイドバー設定パネル ---
@@ -108,7 +170,7 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
           f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果"
       )
 
-      # 該当した各SEVコードごとに個別に詳細カードを生成
+      # 該当した全SEVコードをループ処理して各カードを出力
       for idx, row in matched.iterrows():
         sev_no = row["SEV番号"]
         make = row["メーカー"]
@@ -133,7 +195,6 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
         # 2. 有効期限チェック
         is_expired = expiry and expiry < today
 
-        # ROVER公式検索ダイレクトURL
         rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
 
         # 各SEVコードごとのカード表示
@@ -156,7 +217,7 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
             )
 
           with c2:
-            # 判定ステータスバッジの表示
+            # 判定ステータスバッジ
             if not in_range:
               st.error("❌ 製造年月 対象外")
               st.caption(
@@ -173,8 +234,18 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
               st.success("✅ SEV適合 & 期間内")
 
             st.markdown(
-                f"👉 [**ROVERで {sev_no} の MRE を確認**]({rover_link})"
+                f"👉 [**ROVERで {sev_no} の MRE を直接開く**]({rover_link})"
             )
+
+          # --- 該当SEVの自動照合試行 ---
+          with st.spinner(f"ROVERから {sev_no} のデータを取得試行中..."):
+            has_mre, mre_res = fetch_rover_mre_by_select(sev_no)
+
+          if has_mre and isinstance(mre_res, list):
+            st.markdown(f"**【ROVER自動検出】{sev_no} の Model Report**")
+            st.dataframe(pd.DataFrame(mre_res), use_container_width=True)
+          else:
+            st.caption(f"💡 {mre_res}")
 
       st.markdown("---")
       st.subheader("📊 検索結果一覧（データシート）")
