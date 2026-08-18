@@ -2,6 +2,7 @@ from datetime import datetime
 import re
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ページ全体の基本設定
 st.set_page_config(
@@ -10,12 +11,12 @@ st.set_page_config(
     page_icon="🚘",
 )
 
-# タイトルを小文字（控えめなサイズ）に変更 ＋ ランクルやちいかわ風の絵文字を追加
+# タイトルを小文字（控えめなサイズ）＋ 親しみやすい絵文字
 st.markdown(
     "### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🐻🐱"
 )
 st.caption(
-    "SEVs（特別輸入車両）早見表照合 ＋ ROVER（モデルレポート）ワンクリックコピー検索"
+    "SEVs（特別輸入車両）早見表照合 ＋ ワンクリック即時コピー＆ROVER起動ツール"
 )
 
 
@@ -112,7 +113,7 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
           f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果"
       )
 
-      rover_base_url = (
+      rover_url = (
           "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
       )
 
@@ -159,10 +160,6 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
                 f" {exp_str if pd.notna(exp_str) else '期限設定なし'}"
             )
 
-            # SEV番号のワンクリックコピー用コードブロック
-            st.markdown("👇 **検索用SEV番号（右端のボタンで1秒コピー！）**")
-            st.code(sev_no, language="text")
-
           with c2:
             # 適合バッジの表示
             if not in_range:
@@ -180,10 +177,34 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
             else:
               st.success("✅ SEV適合 & 期間内 🎊")
 
-            st.markdown(
-                f"🔗 [**ROVER公式検索画面を開く ↗️**]({rover_base_url})"
-            )
-            st.caption("※番号をコピー後、上記を開いて検索窓に貼り付け")
+            # JavaScript連携ボタン（クリックでクリップボード書き込み ＋ ROVERを開く）
+            html_button = f"""
+            <button onclick="copyAndOpen()" style="
+                background-color: #FF4B4B;
+                color: white;
+                border: none;
+                padding: 10px 16px;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 8px;
+                cursor: pointer;
+                width: 100%;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            ">
+                🔗 コピーしてROVERを開く ↗️
+            </button>
+            <script>
+            function copyAndOpen() {{
+                navigator.clipboard.writeText("{sev_no}").then(function() {{
+                    window.open("{rover_url}", "_blank");
+                }}).catch(function(err) {{
+                    window.open("{rover_url}", "_blank");
+                }});
+            }}
+            </script>
+            """
+            components.html(html_button, height=50)
+            st.caption("※開いたら検索窓で Ctrl + V (貼り付け)")
 
       st.markdown("---")
       st.subheader("📊 検索結果一覧（データシート） 🐻🐱")
