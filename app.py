@@ -1,8 +1,7 @@
 from datetime import datetime
 import re
-import bs4
 import pandas as pd
-import requests
+from playwright.sync_api import sync_playwright
 import streamlit as st
 
 # ページ全体の基本設定
@@ -33,65 +32,75 @@ def load_sev_data(file):
   return df
 
 
-# 2. ROVERサイトからModel Report情報を自動取得する関数（API/多角検索対応版）
-def fetch_rover_mre_info(sev_no):
-  """ROVERサイトおよびエンドポイントへアクセスし、対象SEV番号に関連するModel Report（MRE）を自動検索します"""
+# 2. Playwrightを使用してROVERのフォームに自動入力＆クリックする関数
+def fetch_rover_mre_with_playwright(sev_no):
+  """Chromiumブラウザを起動し、ROVERの検索マスに自動入力・ボタンクリックを行って結果を取得します"""
   rover_url = (
       "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
   )
 
-  headers = {
-      "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          " (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-      ),
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Referer": "https://www.rover.infrastructure.gov.au/",
-  }
-
-  session = requests.Session()
-
   try:
-    # 1. 直接HTMLテーブルからのスクレイピング試行
-    params = {"RelatedApproval": sev_no}
-    res = session.get(rover_url, params=params, headers=headers, timeout=10)
+    with sync_playwright() as p:
+      # ヘッドレス（画面非表示）モードでChromiumブラウザを起動
+      browser = p.chromium.launch(headless=True)
+      context = browser.new_context(
+          user_agent=(
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+              " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          )
+      )
+      page = context.new_page()
 
-    mre_rows = []
-    if res.status_code == 200:
-      soup = bs4.BeautifulSoup(res.text, "html.parser")
-      tables = soup.find_all("table")
+      # ROVERページに移動
+      page.goto(rover_url, wait_until="networkidle", timeout=30000)
 
-      for table in tables:
-        for tr in table.find_all("tr"):
+      # 1. 「Related Approval」の入力マスを探して文字を入力
+      # （プレースホルダー、ラベル、またはテキスト入力エリアを特定）
+      input_selector = 'input[aria-label*="Related Approval"], input[id*="RelatedApproval"], input[name*="RelatedApproval"]'
+
+      # 万が一CSSセレクタが見つからない場合のフォールバック（ラベルテキスト付近のinputを探す）
+      if not page.is_visible(input_selector):
+        # より柔軟なテキストベースの要素検索
+        page.fill('label:has-text("Related Approval") + input', sev_no)
+      else:
+        page.fill(input_selector, sev_no)
+
+      # 2. 「Filter Approvals」ボタンを探してクリック
+      button_selector = 'button:has-text("Filter Approvals"), input[value*="Filter"], button[id*="filter"]'
+      page.click(button_selector)
+
+      # 3. 検索結果の描画を待機（最大15秒）
+      page.wait_for_timeout(3000)  # 処理待ち
+
+      # 4. テーブルデータの抽出
+      mre_rows = []
+      rows = page.query_selector_all("table tr")
+
+      for row in rows:
+        text = row.inner_text()
+        if "MRE-" in text:
           cols = [
-              td.text.strip().replace("\n", " ").replace("\r", "")
-              for td in tr.find_all(["td", "th"])
-          ]
-          if cols and any("MRE-" in c for c in cols):
+              c.strip()
+              for c in text.split("\t")
+              if c.strip()
+          ] or text.split("\n")
+          cols = [c for c in cols if c]
+          if cols:
             mre_rows.append(cols)
 
-    if mre_rows:
-      return True, mre_rows
+      browser.close()
 
-    # 2. クラウド遮断・動的描画用のバックアップリンク生成
-    direct_link = (
-        f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
-    )
-    return (
-        False,
-        f"ROVERのセキュリティ制御により自動取得が制限されました。[🔗"
-        f" こちらをクリックしてROVER公式検索を開く（{sev_no}検索済み）]({direct_link})",
-    )
+      if mre_rows:
+        return True, mre_rows
+      else:
+        return (
+            False,
+            f"ROVER上で {sev_no} に関連する有効な Model Report"
+            " は見つかりませんでした。",
+        )
 
   except Exception as e:
-    direct_link = (
-        f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
-    )
-    return (
-        False,
-        f"自動接続エラー: [🔗"
-        f" こちらからROVER公式結果を開く]({direct_link})（エラー詳細: {str(e)}）",
-    )
+    return False, f"ブラウザ自動操作中にエラーが発生しました: {str(e)}"
 
 
 # --- サイドバー設定パネル ---
@@ -194,8 +203,10 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
 
         # --- ROVERサイトからの自動情報取得 ---
         st.subheader("🌐 3. ROVER Model Report リアルタイム照合結果")
-        with st.spinner(f"ROVERサイトから {sev_no} の最新データを自動取得しています..."):
-          has_mre, mre_data = fetch_rover_mre_info(sev_no)
+        with st.spinner(
+            f"ブラウザを自動操作して ROVER から {sev_no} の最新データを取得中..."
+        ):
+          has_mre, mre_data = fetch_rover_mre_with_playwright(sev_no)
 
         if is_expired:
           exp_date = first_sev["有効期限"]
@@ -204,7 +215,10 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
               f" ({exp_date}) が切れています。"
           )
         elif not has_mre:
-          st.info(f"ℹ️ **SEV適合確認済み (`{sev_no}`)** \n\n {mre_data}")
+          st.warning(
+              f"⚠️ **判定保留 (Model Report未確認):** SEV適合 (`{sev_no}`)"
+              f" ですが、{mre_data}"
+          )
         elif not raws_permission:
           st.warning(
               f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{sev_no}`) および ROVER上に Model Report が確認されましたが、RAWs工場のライセンス所有状況を確認してください。"
@@ -215,9 +229,9 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
               " Model Report 承認確認完了！"
           )
 
-        # 取得した Model Report テーブルの日本語表示
+        # 取得した Model Report テーブルの表示
         if has_mre and isinstance(mre_data, list):
-          st.markdown("**【ROVERから取得完了】関連する Model Report 一覧**")
+          st.markdown("**【ROVERから自動取得完了】関連する Model Report 一覧**")
           mre_df = pd.DataFrame(mre_data)
           st.dataframe(mre_df, use_container_width=True)
 
