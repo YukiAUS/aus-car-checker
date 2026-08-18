@@ -1,19 +1,22 @@
 from datetime import datetime
 import re
-import bs4
 import pandas as pd
-import requests
 import streamlit as st
 
 # ページ全体の基本設定
 st.set_page_config(
     page_title="オーストラリア中古車輸出 適合判定システム",
     layout="wide",
-    page_icon="🚗",
+    page_icon="🚘",
 )
 
-st.title("🚗 オーストラリア向け中古車輸出 適合判定システム")
-st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）照合ツール")
+# タイトルを小文字（控えめなサイズ）に変更 ＋ ランクルやちいかわ風の絵文字を追加
+st.markdown(
+    "### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🐻🐱"
+)
+st.caption(
+    "SEVs（特別輸入車両）早見表照合 ＋ ROVER（モデルレポート）ワンクリックコピー検索"
+)
 
 
 # 1. SEVデータ（Excel）の読み込み
@@ -52,57 +55,6 @@ def parse_dmy(date_str):
     return None
 
 
-# 2. 現行環境の標準通信（requests）でROVERデータを試行取得する関数
-def fetch_rover_mre_standard(sev_no):
-  rover_url = (
-      "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
-  )
-  target_url = f"{rover_url}?RelatedApproval={sev_no}"
-
-  headers = {
-      "User-Agent": (
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      ),
-      "Accept": (
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-      ),
-  }
-
-  try:
-    res = requests.get(target_url, headers=headers, timeout=10)
-
-    if res.status_code == 200:
-      soup = bs4.BeautifulSoup(res.text, "html.parser")
-      mre_rows = []
-
-      for tr in soup.find_all("tr"):
-        text = tr.text
-        if "MRE-" in text:
-          cols = [
-              td.text.strip().replace("\n", " ").replace("\r", "")
-              for td in tr.find_all(["td", "th"])
-          ]
-          if cols:
-            mre_rows.append(cols)
-
-      if mre_rows:
-        return True, mre_rows
-
-    # ROVERのJS動的描画により自動取得できない場合
-    return (
-        False,
-        f"ROVERのセキュリティ制御により自動取得が制限されました。[🔗"
-        f" こちらをクリックしてROVER公式検索を開く（{sev_no}検索済み）]({target_url})",
-    )
-
-  except Exception as e:
-    return (
-        False,
-        f"通信制限: [🔗 こちらをクリックしてROVER公式検索を開く（{sev_no}検索済み）]({target_url})",
-    )
-
-
 # --- サイドバー設定パネル ---
 st.sidebar.header("📁 1. データファイルの選択")
 uploaded_file = st.sidebar.file_uploader(
@@ -130,7 +82,7 @@ raws_permission = st.sidebar.checkbox(
 
 
 # --- メイン判定処理 ---
-if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
+if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
   if not uploaded_file:
     st.error("最初に左のサイドバーから「AUS SEV早見表.xlsx」をアップロードしてください。")
   elif not input_query:
@@ -160,7 +112,11 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
           f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果"
       )
 
-      # 該当した各SEVコードごとに個別カードを生成
+      rover_base_url = (
+          "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
+      )
+
+      # 該当した各SEVコードごとに個別のカードを生成
       for idx, row in matched.iterrows():
         sev_no = row["SEV番号"]
         make = row["メーカー"]
@@ -184,11 +140,9 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
         # 2. 有効期限チェック
         is_expired = expiry and expiry < today
 
-        rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
-
         # 各SEVコードごとのカード表示
         with st.expander(
-            f"🔹 **SEV Code: {sev_no}** | {make} {model} ({model_code})",
+            f"🚜 **SEV Code: {sev_no}** | {make} {model} ({model_code}) 🐾",
             expanded=True,
         ):
           c1, c2 = st.columns([2, 1])
@@ -205,7 +159,12 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
                 f" {exp_str if pd.notna(exp_str) else '期限設定なし'}"
             )
 
+            # SEV番号のワンクリックコピー用コードブロック
+            st.markdown("👇 **検索用SEV番号（右端のボタンで1秒コピー！）**")
+            st.code(sev_no, language="text")
+
           with c2:
+            # 適合バッジの表示
             if not in_range:
               st.error("❌ 製造年月 対象外")
               st.caption(
@@ -219,20 +178,13 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
               st.warning("⚠️ RAWs利用権 未確認")
               st.caption("RAWs工場のModel Reportライセンス確認が必要です。")
             else:
-              st.success("✅ SEV適合 & 期間内")
+              st.success("✅ SEV適合 & 期間内 🎊")
 
             st.markdown(
-                f"👉 [**ROVERで {sev_no} の MRE を開く**]({rover_link})"
+                f"🔗 [**ROVER公式検索画面を開く ↗️**]({rover_base_url})"
             )
-
-          # ROVERデータ照合結果または直接リンク案内
-          has_mre, mre_res = fetch_rover_mre_standard(sev_no)
-          if has_mre and isinstance(mre_res, list):
-            st.markdown(f"**【自動取得データ】{sev_no} の Model Report**")
-            st.dataframe(pd.DataFrame(mre_res), use_container_width=True)
-          else:
-            st.info(f"ℹ️ {mre_res}")
+            st.caption("※番号をコピー後、上記を開いて検索窓に貼り付け")
 
       st.markdown("---")
-      st.subheader("📊 検索結果一覧（データシート）")
+      st.subheader("📊 検索結果一覧（データシート） 🐻🐱")
       st.dataframe(matched, use_container_width=True)
