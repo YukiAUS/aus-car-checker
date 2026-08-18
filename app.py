@@ -1,8 +1,30 @@
 from datetime import datetime
+import os
 import re
+import subprocess
 import pandas as pd
-from playwright.sync_api import sync_playwright
 import streamlit as st
+
+# --- Playwrightブラウザ本体の自動インストール処理 ---
+try:
+  from playwright.sync_api import sync_playwright
+except ImportError:
+  subprocess.run(["pip", "install", "playwright"])
+  from playwright.sync_api import sync_playwright
+
+
+@st.cache_resource
+def install_playwright_browsers():
+  """Streamlit Cloud環境でPlaywright用のChromiumを自動セットアップします"""
+  try:
+    subprocess.run(["playwright", "install", "chromium"], check=True)
+  except Exception as e:
+    st.error(f"Playwrightのブラウザセットアップに失敗しました: {e}")
+
+
+# 初回起動時にChromiumをインストール
+install_playwright_browsers()
+
 
 # ページ全体の基本設定
 st.set_page_config(
@@ -41,7 +63,7 @@ def fetch_rover_mre_with_playwright(sev_no):
 
   try:
     with sync_playwright() as p:
-      # ヘッドレス（画面非表示）モードでChromiumブラウザを起動
+      # ヘッドレスモードでChromiumを起動
       browser = p.chromium.launch(headless=True)
       context = browser.new_context(
           user_agent=(
@@ -52,25 +74,26 @@ def fetch_rover_mre_with_playwright(sev_no):
       page = context.new_page()
 
       # ROVERページに移動
-      page.goto(rover_url, wait_until="networkidle", timeout=30000)
+      page.goto(rover_url, wait_until="networkidle", timeout=45000)
 
       # 1. 「Related Approval」の入力マスを探して文字を入力
-      # （プレースホルダー、ラベル、またはテキスト入力エリアを特定）
       input_selector = 'input[aria-label*="Related Approval"], input[id*="RelatedApproval"], input[name*="RelatedApproval"]'
 
-      # 万が一CSSセレクタが見つからない場合のフォールバック（ラベルテキスト付近のinputを探す）
-      if not page.is_visible(input_selector):
-        # より柔軟なテキストベースの要素検索
-        page.fill('label:has-text("Related Approval") + input', sev_no)
-      else:
+      try:
+        page.wait_for_selector(input_selector, timeout=10000)
         page.fill(input_selector, sev_no)
+      except:
+        # 代替セレクタで入力試行
+        page.fill('input[type="text"]', sev_no)
 
       # 2. 「Filter Approvals」ボタンを探してクリック
-      button_selector = 'button:has-text("Filter Approvals"), input[value*="Filter"], button[id*="filter"]'
+      button_selector = (
+          'button:has-text("Filter Approvals"), input[value*="Filter"]'
+      )
       page.click(button_selector)
 
-      # 3. 検索結果の描画を待機（最大15秒）
-      page.wait_for_timeout(3000)  # 処理待ち
+      # 3. 検索結果の描画を待機
+      page.wait_for_timeout(4000)
 
       # 4. テーブルデータの抽出
       mre_rows = []
@@ -79,12 +102,9 @@ def fetch_rover_mre_with_playwright(sev_no):
       for row in rows:
         text = row.inner_text()
         if "MRE-" in text:
-          cols = [
-              c.strip()
-              for c in text.split("\t")
-              if c.strip()
-          ] or text.split("\n")
-          cols = [c for c in cols if c]
+          cols = [c.strip() for c in text.split("\t") if c.strip()]
+          if not cols or len(cols) == 1:
+            cols = [c.strip() for c in text.split("\n") if c.strip()]
           if cols:
             mre_rows.append(cols)
 
