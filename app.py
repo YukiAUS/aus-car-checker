@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 st.title("🚗 オーストラリア向け中古車輸出 適合判定システム")
-st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）自動照合ツール")
+st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）照合ツール")
 
 
 # 1. SEVデータ（Excel）の読み込み
@@ -52,12 +52,12 @@ def parse_dmy(date_str):
     return None
 
 
-# 2. ドロップダウン（select）入力＆ボタン実行を直接通信で自動再現する関数
-def fetch_rover_mre_by_select(sev_no):
-  """指定されたXPathの <select> ドロップダウン要素と <button> のフォーム送信処理を再現します"""
-  base_url = (
+# 2. 現行環境の標準通信（requests）でROVERデータを試行取得する関数
+def fetch_rover_mre_standard(sev_no):
+  rover_url = (
       "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
   )
+  target_url = f"{rover_url}?RelatedApproval={sev_no}"
 
   headers = {
       "User-Agent": (
@@ -67,21 +67,15 @@ def fetch_rover_mre_by_select(sev_no):
       "Accept": (
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
       ),
-      "Referer": base_url,
   }
 
-  session = requests.Session()
-
   try:
-    # <select> への値選択とボタン押下（フォームパラメータ送信）を直接実行
-    params = {"RelatedApproval": sev_no}
-    res = session.get(base_url, params=params, headers=headers, timeout=12)
+    res = requests.get(target_url, headers=headers, timeout=10)
 
     if res.status_code == 200:
       soup = bs4.BeautifulSoup(res.text, "html.parser")
       mre_rows = []
 
-      # テーブル要素から抽出
       for tr in soup.find_all("tr"):
         text = tr.text
         if "MRE-" in text:
@@ -95,20 +89,17 @@ def fetch_rover_mre_by_select(sev_no):
       if mre_rows:
         return True, mre_rows
 
-    # 公式ダイレクトURL（フォールバック用）
-    rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
+    # ROVERのJS動的描画により自動取得できない場合
     return (
         False,
-        f"ROVERポータルの動的通信により自動取得が制限されました。[🔗"
-        f" ROVER公式画面で {sev_no} を開く]({rover_link})",
+        f"ROVERのセキュリティ制御により自動取得が制限されました。[🔗"
+        f" こちらをクリックしてROVER公式検索を開く（{sev_no}検索済み）]({target_url})",
     )
 
   except Exception as e:
-    rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
     return (
         False,
-        f"通信エラー: [🔗 ROVER公式画面で {sev_no}"
-        f" を開く]({rover_link})（詳細: {str(e)}）",
+        f"通信制限: [🔗 こちらをクリックしてROVER公式検索を開く（{sev_no}検索済み）]({target_url})",
     )
 
 
@@ -149,7 +140,6 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
     target_date = datetime(build_year, build_month, 1)
     today = datetime.now()
 
-    # あいまい部分一致検索（スペースを除外して比較）
     query_clean = re.sub(r"\s+", "", input_query)
 
     def is_match(row):
@@ -170,12 +160,11 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
           f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果"
       )
 
-      # 該当した全SEVコードをループ処理して各カードを出力
+      # 該当した各SEVコードごとに個別カードを生成
       for idx, row in matched.iterrows():
         sev_no = row["SEV番号"]
         make = row["メーカー"]
         model = row["車種名"]
-        cat = row["カテゴリ"]
         model_code = row["型式"]
         f_str = row["製造開始年月"]
         t_str = row["製造終了年月"]
@@ -217,7 +206,6 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
             )
 
           with c2:
-            # 判定ステータスバッジ
             if not in_range:
               st.error("❌ 製造年月 対象外")
               st.caption(
@@ -234,18 +222,16 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
               st.success("✅ SEV適合 & 期間内")
 
             st.markdown(
-                f"👉 [**ROVERで {sev_no} の MRE を直接開く**]({rover_link})"
+                f"👉 [**ROVERで {sev_no} の MRE を開く**]({rover_link})"
             )
 
-          # --- 該当SEVの自動照合試行 ---
-          with st.spinner(f"ROVERから {sev_no} のデータを取得試行中..."):
-            has_mre, mre_res = fetch_rover_mre_by_select(sev_no)
-
+          # ROVERデータ照合結果または直接リンク案内
+          has_mre, mre_res = fetch_rover_mre_standard(sev_no)
           if has_mre and isinstance(mre_res, list):
-            st.markdown(f"**【ROVER自動検出】{sev_no} の Model Report**")
+            st.markdown(f"**【自動取得データ】{sev_no} の Model Report**")
             st.dataframe(pd.DataFrame(mre_res), use_container_width=True)
           else:
-            st.caption(f"💡 {mre_res}")
+            st.info(f"ℹ️ {mre_res}")
 
       st.markdown("---")
       st.subheader("📊 検索結果一覧（データシート）")
