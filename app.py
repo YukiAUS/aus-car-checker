@@ -65,7 +65,7 @@ def fetch_rover_mre_info(sev_no):
           return True, rows
       return False, "ROVER上に該当する Model Report（モデルレポート）は見つかりませんでした。"
     else:
-      return False, f"ROVERとの通信に失敗しました (エラーコード: {response.status_code})"
+      return False f"ROVERとの通信に失敗しました (エラーコード: {response.status_code})"
   except Exception as e:
     return False, f"自動データ取得中にエラーが発生しました: {str(e)}"
 
@@ -174,16 +174,37 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
           has_mre, mre_data = fetch_rover_mre_info(sev_no)
 
         if is_expired:
+          exp_date = first_sev['有効期限']
           st.warning(
-              f"⚠️ **要確認 (SEV有効期限切れ):** SEV番号 `{sev_no}` の有効期限"
-              f" ({first_sev['有効期限']}) が切れています。"
+              f"⚠️ **要確認 (SEV有効期限切れ):** SEV番号 `{sev_no}` の有効期限 ({exp_date}) が切れています。"
           )
         elif not has_mre:
           st.warning(
-              f"⚠️ **判定保留 (Model Report未発見):** SEV適合 (`{sev_no}`)"
-              " ですが、ROVER上で有効な Model Report"
-              f" が確認できませんでした。({mre_data})"
+              f"⚠️ **判定保留 (Model Report未発見):** SEV適合 (`{sev_no}`) ですが、ROVER上で有効な Model Report が確認できませんでした。({mre_data})"
           )
         elif not raws_permission:
           st.warning(
-              f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{
+              f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{sev_no}`) および ROVER上に Model Report が確認されましたが、RAWs工場のライセンス所有状況を確認してください。"
+          )
+        else:
+          st.success(
+              f"✅ **輸出可能:** SEV適合 (`{sev_no}`)、製造年月適性、ROVER上の Model Report 承認確認完了！"
+          )
+
+        # 取得した Model Report テーブルの日本語表示
+        if has_mre and isinstance(mre_data, list):
+          st.markdown("**【ROVERから取得完了】関連する Model Report 一覧**")
+          mre_df = pd.DataFrame(
+              mre_data,
+              columns=[
+                  "承認番号 (Approval No)",
+                  "承認所有者 (Holder)",
+                  "メーカー / 車種名",
+                  "ステータス",
+                  "有効期限",
+              ],
+          )
+          st.dataframe(mre_df, use_container_width=True)
+
+        st.subheader("📋 一致したSEV登録データ")
+        st.dataframe(matched, use_container_width=True)
