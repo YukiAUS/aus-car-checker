@@ -9,11 +9,12 @@ import streamlit.components.v1 as components
 st.set_page_config(
     page_title="オーストラリア中古車輸出 適合判定システム",
     layout="wide",
-    page_icon="🚘",
+    page_icon="🦘",
 )
 
+# タイトルを小文字（コンパクト）＋ カンガルー・コアラ・ちいかわ風キャラクター
 st.markdown(
-    "### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🐻🐱"
+    "### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🦘🐨 🐥🐶"
 )
 st.caption(
     "SEVs（特別輸入車両）早見表照合 ＋ ワンクリック即時コピー＆ROVER起動ツール"
@@ -62,7 +63,7 @@ def parse_dmy(date_str):
 
 
 # --- サイドバー設定パネル ---
-st.sidebar.header("🔍 1. 車両情報の入力")
+st.sidebar.header("🔍 1. 車両情報の入力 🐨")
 input_query = (
     st.sidebar.text_input("型式 または 車種名", value="CKV36")
     .strip()
@@ -82,15 +83,13 @@ raws_permission = st.sidebar.checkbox(
 )
 
 st.sidebar.markdown("---")
-# 予備: 別のExcelで一時的に試したい場合用の手動アップローダーも残しておく
 uploaded_file = st.sidebar.file_uploader(
-    "（任意）別のSEV早見表を使用する場合", type=["xlsx", "xls"]
+    "（任意）別のSEV早見表を使用する場合 🐥", type=["xlsx", "xls"]
 )
 
 
 # --- メイン判定処理 ---
-if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
-  # データソースの決定（アップロードがあればそれを優先、なければリポジトリの固定ファイルを使用）
+if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary"):
   if uploaded_file:
     sev_df = pd.read_excel(uploaded_file, skiprows=1)
     sev_df.columns = [
@@ -130,11 +129,11 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
 
     if matched.empty:
       st.error(
-          f"❌ **輸出不可 (SEV未登録):** 入力された「{input_query}」に関連するSEV登録情報が見つかりませんでした。"
+          f"❌ **輸出不可 (SEV未登録):** 入力された「{input_query}」に関連するSEV登録情報が見つかりませんでした。 😿"
       )
     else:
       st.subheader(
-          f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果"
+          f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果 🦘✨"
       )
 
       rover_url = (
@@ -165,7 +164,7 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
         is_expired = expiry and expiry < today
 
         with st.expander(
-            f"🚜 **SEV Code: {sev_no}** | {make} {model} ({model_code}) 🐾",
+            f"🚜 **SEV Code: {sev_no}** | {make} {model} ({model_code}) 🐨🐾",
             expanded=True,
         ):
           c1, c2 = st.columns([2, 1])
@@ -175,7 +174,7 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
             st.markdown(f"**対象型式:** `{model_code}`")
             st.markdown(
                 f"**対象製造期間:** {f_str if pd.notna(f_str) else '指定なし'} 〜"
-                f" {t_str if pd.notna(t_str) else '指定なし'}"
+                f" {t_str if pd.notna(f_str) else '指定なし'}"
             )
             st.markdown(
                 f"**SEV有効期限:**"
@@ -184,19 +183,19 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
 
           with c2:
             if not in_range:
-              st.error("❌ 製造年月 対象外")
+              st.error("❌ 製造年月 対象外 😿")
               st.caption(
                   f"入力された {build_year}年{build_month}月"
                   " は対象期間に含まれません。"
               )
             elif is_expired:
-              st.warning("⚠️ SEV有効期限切れ")
+              st.warning("⚠️ SEV有効期限切れ 🙀")
               st.caption(f"SEVの有効期限 ({exp_str}) が過ぎています。")
             elif not raws_permission:
-              st.warning("⚠️ RAWs利用権 未確認")
+              st.warning("⚠️ RAWs利用権 未確認 🐱")
               st.caption("RAWs工場のModel Reportライセンス確認が必要です。")
             else:
-              st.success("✅ SEV適合 & 期間内 🎊")
+              st.success("✅ SEV適合 & 期間内 🎊 🦘")
 
             html_button = f"""
             <button onclick="copyAndOpen()" style="
@@ -211,7 +210,7 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
                 width: 100%;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             ">
-                🔗 コピーしてROVERを開く ↗️
+                🔗 コピーしてROVERを開く ↗️ 🐨
             </button>
             <script>
             function copyAndOpen() {{
@@ -227,5 +226,5 @@ if st.sidebar.button("🚙 適合判定を実行する 💨", type="primary"):
             st.caption("※開いたら検索窓で Ctrl + V (貼り付け)")
 
       st.markdown("---")
-      st.subheader("📊 検索結果一覧（データシート） 🐻🐱")
+      st.subheader("📊 検索結果一覧（データシート） 🐨🦘🐰")
       st.dataframe(matched, use_container_width=True)
