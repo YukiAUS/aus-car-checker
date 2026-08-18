@@ -1,33 +1,7 @@
 from datetime import datetime
-import os
 import re
-import subprocess
 import pandas as pd
 import streamlit as st
-
-# --- Playwrightブラウザおよびシステム依存ライブラリの自動セットアップ ---
-try:
-  from playwright.sync_api import sync_playwright
-except ImportError:
-  subprocess.run(["pip", "install", "playwright"])
-  from playwright.sync_api import sync_playwright
-
-
-@st.cache_resource
-def install_playwright_environment():
-  """Streamlit Cloud環境でPlaywrightと必要なブラウザ環境を完全セットアップします"""
-  try:
-    # Chromiumブラウザ本体のインストール
-    subprocess.run(["playwright", "install", "chromium"], check=True)
-    # 不足しているLinux依存関係の自動補完インストール
-    subprocess.run(["playwright", "install-deps", "chromium"], check=True)
-  except Exception as e:
-    st.error(f"Playwrightの環境構築中に警告が発生しました: {e}")
-
-
-# 初回起動時に自動セットアップを実行
-install_playwright_environment()
-
 
 # ページ全体の基本設定
 st.set_page_config(
@@ -37,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("🚗 オーストラリア向け中古車輸出 適合判定システム")
-st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）自動照合ツール")
+st.caption("SEVs（特別輸入車両）リスト ＋ ROVER（モデルレポート）照合ツール")
 
 
 # 1. SEVデータ（Excel）の読み込み
@@ -57,80 +31,23 @@ def load_sev_data(file):
   return df
 
 
-# 2. Playwrightを使用してROVERのフォームに自動入力＆クリックする関数
-def fetch_rover_mre_with_playwright(sev_no):
-  """Chromiumブラウザを起動し、ROVERの検索マスに自動入力・ボタンクリックを行って結果を取得します"""
-  rover_url = (
-      "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
-  )
-
+# 日付変換ユーティリティ
+def parse_my(date_str):
+  if pd.isna(date_str) or str(date_str).strip() in ["No end date", ""]:
+    return None
   try:
-    with sync_playwright() as p:
-      # ヘッドレスモードでChromiumを起動
-      browser = p.chromium.launch(
-          headless=True,
-          args=[
-              "--no-sandbox",
-              "--disable-setuid-sandbox",
-              "--disable-dev-shm-usage",
-          ],
-      )
-      context = browser.new_context(
-          user_agent=(
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-              " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          )
-      )
-      page = context.new_page()
+    return datetime.strptime(str(date_str).strip(), "%m/%Y")
+  except:
+    return None
 
-      # ROVERページに移動
-      page.goto(rover_url, wait_until="networkidle", timeout=45000)
 
-      # 1. 「Related Approval」の入力マスを探して文字を入力
-      input_selector = 'input[aria-label*="Related Approval"], input[id*="RelatedApproval"], input[name*="RelatedApproval"]'
-
-      try:
-        page.wait_for_selector(input_selector, timeout=10000)
-        page.fill(input_selector, sev_no)
-      except:
-        # 代替セレクタで入力試行
-        page.fill('input[type="text"]', sev_no)
-
-      # 2. 「Filter Approvals」ボタンを探してクリック
-      button_selector = (
-          'button:has-text("Filter Approvals"), input[value*="Filter"]'
-      )
-      page.click(button_selector)
-
-      # 3. 検索結果の描画を待機
-      page.wait_for_timeout(4000)
-
-      # 4. テーブルデータの抽出
-      mre_rows = []
-      rows = page.query_selector_all("table tr")
-
-      for row in rows:
-        text = row.inner_text()
-        if "MRE-" in text:
-          cols = [c.strip() for c in text.split("\t") if c.strip()]
-          if not cols or len(cols) == 1:
-            cols = [c.strip() for c in text.split("\n") if c.strip()]
-          if cols:
-            mre_rows.append(cols)
-
-      browser.close()
-
-      if mre_rows:
-        return True, mre_rows
-      else:
-        return (
-            False,
-            f"ROVER上で {sev_no} に関連する有効な Model Report"
-            " は見つかりませんでした。",
-        )
-
-  except Exception as e:
-    return False, f"ブラウザ自動操作中にエラーが発生しました: {str(e)}"
+def parse_dmy(date_str):
+  if pd.isna(date_str) or str(date_str).strip() in [""]:
+    return None
+  try:
+    return datetime.strptime(str(date_str).strip(), "%d/%m/%Y")
+  except:
+    return None
 
 
 # --- サイドバー設定パネル ---
@@ -157,25 +74,6 @@ build_month = col_m.number_input(
 raws_permission = st.sidebar.checkbox(
     "提携RAWs工場が Model Report の利用ライセンスを保有している", value=True
 )
-
-
-# 日付変換ユーティリティ
-def parse_my(date_str):
-  if pd.isna(date_str) or str(date_str).strip() == "No end date":
-    return None
-  try:
-    return datetime.strptime(str(date_str).strip(), "%m/%Y")
-  except:
-    return None
-
-
-def parse_dmy(date_str):
-  if pd.isna(date_str):
-    return None
-  try:
-    return datetime.strptime(str(date_str).strip(), "%d/%m/%Y")
-  except:
-    return None
 
 
 # --- メイン判定処理 ---
@@ -206,64 +104,78 @@ if st.sidebar.button("🚗 適合判定を実行する", type="primary"):
           f"❌ **輸出不可 (SEV未登録):** 入力された「{input_query}」に関連するSEV登録情報が見つかりませんでした。"
       )
     else:
-      valid_sevs = []
-      for idx, row in matched.iterrows():
-        d_from = parse_my(row["製造開始年月"])
-        d_to = parse_my(row["製造終了年月"])
-        expiry = parse_dmy(row["有効期限"])
+      st.subheader(
+          f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果"
+      )
 
+      # 該当した各SEVコードごとに個別に詳細カードを生成
+      for idx, row in matched.iterrows():
+        sev_no = row["SEV番号"]
+        make = row["メーカー"]
+        model = row["車種名"]
+        cat = row["カテゴリ"]
+        model_code = row["型式"]
+        f_str = row["製造開始年月"]
+        t_str = row["製造終了年月"]
+        exp_str = row["有効期限"]
+
+        d_from = parse_my(f_str)
+        d_to = parse_my(t_str)
+        expiry = parse_dmy(exp_str)
+
+        # 1. 製造年月チェック
         in_range = True
         if d_from and target_date < d_from:
           in_range = False
         if d_to and target_date > d_to:
           in_range = False
 
+        # 2. 有効期限チェック
         is_expired = expiry and expiry < today
 
-        if in_range:
-          valid_sevs.append((row, is_expired))
+        # ROVER公式検索ダイレクトURL
+        rover_link = f"https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/?RelatedApproval={sev_no}"
 
-      if not valid_sevs:
-        st.error(
-            f"❌ **輸出不可 (製造年月が対象外):** SEV登録 ({matched.iloc[0]['SEV番号']}) は存在しますが、指定の製造年月 ({build_year}年{build_month}月) は対象期間外です。"
-        )
-      else:
-        first_sev, is_expired = valid_sevs[0]
-        sev_no = first_sev["SEV番号"]
-
-        # --- ROVERサイトからの自動情報取得 ---
-        st.subheader("🌐 3. ROVER Model Report リアルタイム照合結果")
-        with st.spinner(
-            f"ブラウザを自動操作して ROVER から {sev_no} の最新データを取得中..."
+        # 各SEVコードごとのカード表示
+        with st.expander(
+            f"🔹 **SEV Code: {sev_no}** | {make} {model} ({model_code})",
+            expanded=True,
         ):
-          has_mre, mre_data = fetch_rover_mre_with_playwright(sev_no)
+          c1, c2 = st.columns([2, 1])
 
-        if is_expired:
-          exp_date = first_sev["有効期限"]
-          st.warning(
-              f"⚠️ **要確認 (SEV有効期限切れ):** SEV番号 `{sev_no}` の有効期限"
-              f" ({exp_date}) が切れています。"
-          )
-        elif not has_mre:
-          st.warning(
-              f"⚠️ **判定保留 (Model Report未確認):** SEV適合 (`{sev_no}`)"
-              f" ですが、{mre_data}"
-          )
-        elif not raws_permission:
-          st.warning(
-              f"⚠️ **判定保留 (RAWs利用権未確認):** SEV適合 (`{sev_no}`) および ROVER上に Model Report が確認されましたが、RAWs工場のライセンス所有状況を確認してください。"
-          )
-        else:
-          st.success(
-              f"✅ **輸出可能:** SEV適合 (`{sev_no}`)、製造年月適性、ROVER上の"
-              " Model Report 承認確認完了！"
-          )
+          with c1:
+            st.markdown(f"**メーカー / 車種名:** {make} {model}")
+            st.markdown(f"**対象型式:** `{model_code}`")
+            st.markdown(
+                f"**対象製造期間:** {f_str if pd.notna(f_str) else '指定なし'} 〜"
+                f" {t_str if pd.notna(t_str) else '指定なし'}"
+            )
+            st.markdown(
+                f"**SEV有効期限:**"
+                f" {exp_str if pd.notna(exp_str) else '期限設定なし'}"
+            )
 
-        # 取得した Model Report テーブルの表示
-        if has_mre and isinstance(mre_data, list):
-          st.markdown("**【ROVERから自動取得完了】関連する Model Report 一覧**")
-          mre_df = pd.DataFrame(mre_data)
-          st.dataframe(mre_df, use_container_width=True)
+          with c2:
+            # 判定ステータスバッジの表示
+            if not in_range:
+              st.error("❌ 製造年月 対象外")
+              st.caption(
+                  f"入力された {build_year}年{build_month}月"
+                  " は対象期間に含まれません。"
+              )
+            elif is_expired:
+              st.warning("⚠️ SEV有効期限切れ")
+              st.caption(f"SEVの有効期限 ({exp_str}) が過ぎています。")
+            elif not raws_permission:
+              st.warning("⚠️ RAWs利用権 未確認")
+              st.caption("RAWs工場のModel Reportライセンス確認が必要です。")
+            else:
+              st.success("✅ SEV適合 & 期間内")
 
-        st.subheader("📋 一致したSEV登録データ")
-        st.dataframe(matched, use_container_width=True)
+            st.markdown(
+                f"👉 [**ROVERで {sev_no} の MRE を確認**]({rover_link})"
+            )
+
+      st.markdown("---")
+      st.subheader("📊 検索結果一覧（データシート）")
+      st.dataframe(matched, use_container_width=True)
