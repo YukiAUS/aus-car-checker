@@ -5,19 +5,40 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-# ページ全体の基本設定
+# ページ全体の基本設定（スマホ表示時のレスポンシブ最適化）
 st.set_page_config(
     page_title="オーストラリア中古車輸出 適合判定システム",
     layout="wide",
     page_icon="🦘",
+    initial_sidebar_state="collapsed",  # スマホ開いた時にサイドバーを自動で閉じて見やすくする
 )
 
-# タイトルを小文字（コンパクト）＋ カンガルー・コアラ・ちいかわ風キャラクター
+# スマホ画面向けCSSの適用（文字サイズとボタン余白の微調整）
 st.markdown(
-    "### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🦘🐨 🐥🐶"
+    """
+    <style>
+    /* スマホ画面での余白調整 */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 0.8rem !important;
+        padding-right: 0.8rem !important;
+    }
+    /* 見出しサイズのスマホ最適化 */
+    h3 {
+        font-size: 1.25rem !important;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
+# タイトル（控えめサイズ ＋ キャラクター）
+st.markdown(
+    "### 🚘 🚜 オーストラリア輸出適合判定 🦘🐨 🐥🐶"
 )
 st.caption(
-    "SEVs（特別輸入車両）早見表照合 ＋ ワンクリック即時コピー＆ROVER起動ツール"
+    "SEVs早見表照合 ＋ ワンクリック即時コピー＆ROVER起動ツール"
 )
 
 # 固定ファイルパスの設定
@@ -133,7 +154,7 @@ if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary
       )
     else:
       st.subheader(
-          f"📋 該当するSEVエントリー ({len(matched)}件) & 各SEVコード別の判定結果 🦘✨"
+          f"📋 該当SEV ({len(matched)}件) 🦘✨"
       )
 
       rover_url = (
@@ -164,53 +185,51 @@ if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary
         is_expired = expiry and expiry < today
 
         with st.expander(
-            f"🚜 **SEV Code: {sev_no}** | {make} {model} ({model_code}) 🐨🐾",
+            f"🚜 **{sev_no}** | {make} {model} 🐨",
             expanded=True,
         ):
-          c1, c2 = st.columns([2, 1])
+          # スマホでも見やすいようにカラム比率を自動調整
+          c1, c2 = st.columns([1, 1])
 
           with c1:
-            st.markdown(f"**メーカー / 車種名:** {make} {model}")
+            st.markdown(f"**メーカー/車種:** {make} {model}")
             st.markdown(f"**対象型式:** `{model_code}`")
             st.markdown(
-                f"**対象製造期間:** {f_str if pd.notna(f_str) else '指定なし'} 〜"
+                f"**製造期間:** {f_str if pd.notna(f_str) else '指定なし'} 〜"
                 f" {t_str if pd.notna(f_str) else '指定なし'}"
             )
             st.markdown(
-                f"**SEV有効期限:**"
-                f" {exp_str if pd.notna(exp_str) else '期限設定なし'}"
+                f"**SEV期限:**"
+                f" {exp_str if pd.notna(exp_str) else '設定なし'}"
             )
 
           with c2:
             if not in_range:
               st.error("❌ 製造年月 対象外 😿")
-              st.caption(
-                  f"入力された {build_year}年{build_month}月"
-                  " は対象期間に含まれません。"
-              )
             elif is_expired:
               st.warning("⚠️ SEV有効期限切れ 🙀")
-              st.caption(f"SEVの有効期限 ({exp_str}) が過ぎています。")
             elif not raws_permission:
               st.warning("⚠️ RAWs利用権 未確認 🐱")
-              st.caption("RAWs工場のModel Reportライセンス確認が必要です。")
             else:
               st.success("✅ SEV適合 & 期間内 🎊 🦘")
 
+            # スマホ対応：タップしやすい大きなアクションボタン
             html_button = f"""
             <button onclick="copyAndOpen()" style="
                 background-color: #FF4B4B;
                 color: white;
                 border: none;
-                padding: 10px 16px;
-                font-size: 14px;
+                padding: 12px 14px;
+                font-size: 15px;
                 font-weight: bold;
-                border-radius: 8px;
+                border-radius: 10px;
                 cursor: pointer;
                 width: 100%;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                margin-top: 5px;
+                box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+                -webkit-tap-highlight-color: transparent;
             ">
-                🔗 コピーしてROVERを開く ↗️ 🐨
+                📲 コピーしてROVERを開く 🐨
             </button>
             <script>
             function copyAndOpen() {{
@@ -222,9 +241,9 @@ if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary
             }}
             </script>
             """
-            components.html(html_button, height=50)
-            st.caption("※開いたら検索窓で Ctrl + V (貼り付け)")
+            components.html(html_button, height=60)
+            st.caption("※開いたら検索窓を長押し ➔ 貼り付け")
 
       st.markdown("---")
-      st.subheader("📊 検索結果一覧（データシート） 🐨🦘🐰")
+      st.subheader("📊 検索結果一覧（データシート） 🐨🦘")
       st.dataframe(matched, use_container_width=True)
