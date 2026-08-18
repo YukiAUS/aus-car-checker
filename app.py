@@ -5,7 +5,7 @@ import subprocess
 import pandas as pd
 import streamlit as st
 
-# --- Playwrightブラウザ本体の自動インストール処理 ---
+# --- Playwrightブラウザおよびシステム依存ライブラリの自動セットアップ ---
 try:
   from playwright.sync_api import sync_playwright
 except ImportError:
@@ -14,16 +14,19 @@ except ImportError:
 
 
 @st.cache_resource
-def install_playwright_browsers():
-  """Streamlit Cloud環境でPlaywright用のChromiumを自動セットアップします"""
+def install_playwright_environment():
+  """Streamlit Cloud環境でPlaywrightと必要なブラウザ環境を完全セットアップします"""
   try:
+    # Chromiumブラウザ本体のインストール
     subprocess.run(["playwright", "install", "chromium"], check=True)
+    # 不足しているLinux依存関係の自動補完インストール
+    subprocess.run(["playwright", "install-deps", "chromium"], check=True)
   except Exception as e:
-    st.error(f"Playwrightのブラウザセットアップに失敗しました: {e}")
+    st.error(f"Playwrightの環境構築中に警告が発生しました: {e}")
 
 
-# 初回起動時にChromiumをインストール
-install_playwright_browsers()
+# 初回起動時に自動セットアップを実行
+install_playwright_environment()
 
 
 # ページ全体の基本設定
@@ -64,7 +67,14 @@ def fetch_rover_mre_with_playwright(sev_no):
   try:
     with sync_playwright() as p:
       # ヘッドレスモードでChromiumを起動
-      browser = p.chromium.launch(headless=True)
+      browser = p.chromium.launch(
+          headless=True,
+          args=[
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--disable-dev-shm-usage",
+          ],
+      )
       context = browser.new_context(
           user_agent=(
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
