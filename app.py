@@ -141,129 +141,128 @@ def load_all_four_characters():
 sprites = load_all_four_characters()
 
 kuri_bg_rule = (
-    f"background-image: url('{sprites['kurimanju']}');"
+    "background-image: url('" + sprites["kurimanju"] + "');"
     if sprites.get("kurimanju")
     else ""
 )
 
-CUSTOM_CSS = f"""
-<style>
-.stApp {{ background-color: #F4F6F9; }}
-section[data-testid='stSidebar'] {{
-  background-color: #FFFFFF;
-  border-right: 1px solid #E2E8F0;
-}}
-.main .block-container {{
-  padding-top: 1.6rem !important;
-  max-width: 1180px;
-}}
-@keyframes footStepIdle {{
-  0%, 100% {{ transform: translateY(0px) rotate(0deg) scaleY(1); }}
-  25%      {{ transform: translateY(-2px) rotate(-2.5deg) scaleY(0.98); }}
-  50%      {{ transform: translateY(0px) rotate(0deg) scaleY(1); }}
-  75%      {{ transform: translateY(-2px) rotate(2.5deg) scaleY(0.98); }}
-}}
-@keyframes footStepActive {{
-  0%, 100% {{ transform: translateY(0px) rotate(0deg) scaleY(1); }}
-  20%      {{ transform: translateY(-5px) rotate(-4.5deg) scaleY(0.96); }}
-  40%      {{ transform: translateY(0px) rotate(0deg) scaleY(1.02); }}
-  60%      {{ transform: translateY(-5px) rotate(4.5deg) scaleY(0.96); }}
-  80%      {{ transform: translateY(0px) rotate(0deg) scaleY(1.02); }}
-}}
-.chara-step-idle {{
-  transform-origin: bottom center;
-  animation: footStepIdle 2.2s ease-in-out infinite;
-  display: inline-block;
-}}
-.chara-step-active {{
-  transform-origin: bottom center;
-  animation:
-    footStepActive 0.65s ease-in-out 5,
-    footStepIdle 2.2s ease-in-out 3.3s infinite;
-  display: inline-block;
-}}
-.chara-static {{ display: inline-block; }}
-.header-box {{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: linear-gradient(135deg, #2B4168 0%, #3B5984 100%);
-  padding: 16px 26px;
-  border-radius: 14px;
-  box-shadow: 0 4px 12px rgba(15,23,42,0.08);
-  margin-bottom: 18px;
-}}
-.app-title {{
-  font-size: 1.45rem;
-  font-weight: 700;
-  color: #FFFFFF;
-  margin: 0 0 8px 0;
-}}
-.master-badge {{
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255,255,255,0.95);
-  color: #1E293B;
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 999px;
-}}
-.dot-green {{
-  width: 8px;
-  height: 8px;
-  background-color: #10B981;
-  border-radius: 50%;
-  display: inline-block;
-}}
-.result-card {{
-  background: #FFFFFF;
-  border-radius: 14px;
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  border: 1px solid #E2E8F0;
-  box-shadow: 0 4px 12px rgba(15,23,42,0.05);
-}}
-.card-ok {{ border-left: 6px solid #10B981; }}
-.card-warn {{ border-left: 6px solid #F59E0B; }}
-.card-ng {{ border-left: 6px solid #EF4444; }}
-.sev-header {{
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #0F172A;
-  margin-bottom: 8px;
-}}
-.code-pill {{
-  display: inline-block;
-  background: #EFF6FF;
-  color: #1D4ED8;
-  font-weight: 600;
-  font-size: 0.82rem;
-  padding: 3px 10px;
-  border-radius: 6px;
-  border: 1px solid #BFDBFE;
-  margin-bottom: 12px;
-}}
-.info-list {{
-  color: #334155;
-  font-size: 0.92rem;
-  line-height: 1.75;
-  margin: 0;
-  padding-left: 18px;
-}}
-.status-box-ok {{
-  background: #ECFDF5;
-  color: #065F46;
-  border: 1px solid #A7F3D0;
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-weight: 700;
-  font-size: 0.95rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}}
-.status-box-warn {{
-  background: #FFFBEB;
-  color: #92400E;
+CUSTOM_CSS = (
+    "<style>"
+    ".stApp { background-color: #F4F6F9; }"
+    "section[data-testid='stSidebar'] { background-color: #FFFFFF; border-right: 1px solid #E2E8F0; }"
+    ".main .block-container { padding-top: 1.6rem !important; max-width: 1180px; }"
+    "@keyframes footStepIdle {"
+    "  0%, 100% { transform: translateY(0px) rotate(0deg) scaleY(1); }"
+    "  25%      { transform: translateY(-2px) rotate(-2.5deg) scaleY(0.98); }"
+    "  50%      { transform: translateY(0px) rotate(0deg) scaleY(1); }"
+    "  75%      { transform: translateY(-2px) rotate(2.5deg) scaleY(0.98); }"
+    "}"
+    "@keyframes footStepActive {"
+    "  0%, 100% { transform: translateY(0px) rotate(0deg) scaleY(1); }"
+    "  20%      { transform: translateY(-5px) rotate(-4.5deg) scaleY(0.96); }"
+    "  40%      { transform: translateY(0px) rotate(0deg) scaleY(1.02); }"
+    "  60%      { transform: translateY(-5px) rotate(4.5deg) scaleY(0.96); }"
+    "  80%      { transform: translateY(0px) rotate(0deg) scaleY(1.02); }"
+    "}"
+    ".chara-step-idle { transform-origin: bottom center; animation: footStepIdle 2.2s ease-in-out infinite; display: inline-block; }"
+    ".chara-step-active { transform-origin: bottom center; animation: footStepActive 0.65s ease-in-out 5, footStepIdle 2.2s ease-in-out 3.3s infinite; display: inline-block; }"
+    ".chara-static { display: inline-block; }"
+    ".header-box { display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #2B4168 0%, #3B5984 100%); padding: 16px 26px; border-radius: 14px; box-shadow: 0 4px 12px rgba(15,23,42,0.08); margin-bottom: 18px; }"
+    ".app-title { font-size: 1.45rem; font-weight: 700; color: #FFFFFF; margin: 0 0 8px 0; }"
+    ".master-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.95); color: #1E293B; font-size: 0.8rem; font-weight: 600; padding: 4px 12px; border-radius: 999px; }"
+    ".dot-green { width: 8px; height: 8px; background-color: #10B981; border-radius: 50%; display: inline-block; }"
+    ".result-card { background: #FFFFFF; border-radius: 14px; padding: 20px 24px; margin-bottom: 16px; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(15,23,42,0.05); }"
+    ".card-ok { border-left: 6px solid #10B981; }"
+    ".card-warn { border-left: 6px solid #F59E0B; }"
+    ".card-ng { border-left: 6px solid #EF4444; }"
+    ".sev-header { font-size: 1.1rem; font-weight: 700; color: #0F172A; margin-bottom: 8px; }"
+    ".code-pill { display: inline-block; background: #EFF6FF; color: #1D4ED8; font-weight: 600; font-size: 0.82rem; padding: 3px 10px; border-radius: 6px; border: 1px solid #BFDBFE; margin-bottom: 12px; }"
+    ".info-list { color: #334155; font-size: 0.92rem; line-height: 1.75; margin: 0; padding-left: 18px; }"
+    ".status-box-ok { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
+    ".status-box-warn { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
+    ".status-box-ng { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
+    ".kuri-box { display: flex; flex-direction: column; align-items: center; justify-content: center; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 14px; padding: 10px 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }"
+    ".predict-panel { background: #FFFFFF; border: 1px solid #CBD5E1; border-left: 5px solid #3B82F6; border-radius: 12px; padding: 16px 20px; margin-top: 14px; box-shadow: 0 3px 10px rgba(15,23,42,0.04); }"
+    "div.stButton > button[kind='primary'] { background-color: #2B4168; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; width: 100%; }"
+    "@media (max-width: 768px) {"
+    "  [data-testid='stSidebarCollapsedControl'] button,"
+    "  [data-testid='collapsedControl'] button,"
+    "  [data-testid='stExpandSidebarButton'] {"
+    "    width: auto !important; height: 40px !important; padding: 4px 12px 4px 6px !important;"
+    "    background: #FFFFFF !important; border: 1px solid #CBD5E1 !important; border-radius: 12px !important;"
+    "    box-shadow: 0 2px 6px rgba(0,0,0,0.08) !important; display: inline-flex !important; align-items: center !important; gap: 6px !important;"
+    "  }"
+    "  [data-testid='stSidebarCollapsedControl'] button *,"
+    "  [data-testid='collapsedControl'] button *,"
+    "  [data-testid='stExpandSidebarButton'] * { display: none !important; }"
+    "  [data-testid='stSidebarCollapsedControl'] button::before,"
+    "  [data-testid='collapsedControl'] button::before,"
+    "  [data-testid='stExpandSidebarButton']::before {"
+    "    content: '' !important; display: inline-block !important; width: 30px !important; height: 30px !important;"
+    "    " + kuri_bg_rule + " background-size: contain !important; background-repeat: no-repeat !important; background-position: center !important;"
+    "  }"
+    "  [data-testid='stSidebarCollapsedControl'] button::after,"
+    "  [data-testid='collapsedControl'] button::after,"
+    "  [data-testid='stExpandSidebarButton']::after {"
+    "    content: '🔍 車種を検索' !important; color: #31333F !important; font-size: 13px !important; font-weight: 600 !important; white-space: nowrap !important;"
+    "  }"
+    "}"
+    "</style>"
+)
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+ROVER_SEVS_URL = (
+    "https://www.rover.infrastructure.gov.au/PublishedApprovals/SEVApprovals/"
+)
+ROVER_MRE_URL = (
+    "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
+)
+LEGACY_EXCEL_PATH = "AUS SEV早見表.xlsx"
+
+if "show_predictions" not in st.session_state:
+    st.session_state.show_predictions = False
+if "override_query" not in st.session_state:
+    st.session_state.override_query = None
+
+
+def read_sev_file(file_obj_or_path):
+    name = (
+        file_obj_or_path
+        if isinstance(file_obj_or_path, str)
+        else file_obj_or_path.name
+    )
+    if str(name).lower().endswith(".csv"):
+        df = pd.read_csv(file_obj_or_path, skiprows=1).iloc[:, :8]
+    else:
+        df = pd.read_excel(file_obj_or_path, skiprows=1).iloc[:, :8]
+    df.columns = [
+        "SEV番号",
+        "メーカー",
+        "車種名",
+        "カテゴリ",
+        "型式",
+        "製造開始年月",
+        "製造終了年月",
+        "有効期限",
+    ]
+    return df.dropna(subset=["SEV番号"])
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_latest_sev_master():
+    candidates = (
+        glob.glob("AUS_SEV_LATEST*.xlsx")
+        + glob.glob("AUS_SEV_LATEST*.xls")
+        + glob.glob("AUS_SEV_LATEST*.csv")
+    )
+    if candidates:
+        candidates.sort(key=lambda x: (x, os.path.getmtime(x)), reverse=True)
+        latest_path = candidates[0]
+        try:
+            df = read_sev_file(latest_path)
+            date_str = "最新版"
+            if "(" in latest_path and ")" in latest_path:
+                date_str = latest_path.split("(")[1].split(")")[0]
+            msg = f"ROVER SEVs Master | {date_str} 更新（全{len(df)}車種）"
+            return df, msg
+        except Exception as e:
