@@ -221,16 +221,15 @@ def parse_dmy(date_str):
 
 
 st.sidebar.markdown("### 🔍 車両・型式検索")
-default_q = st.session_state.override_query if st.session_state.override_query else "ZVW40"
+default_q = st.session_state.override_query if st.session_state.override_query else "DA16T"
 raw_input = st.sidebar.text_input("メーカー・車種名・型式・SEV番号", value=default_q)
 if st.session_state.override_query and raw_input == st.session_state.override_query:
     st.session_state.override_query = None
 input_query = raw_input.strip().upper()
 
 col_y, col_m = st.sidebar.columns(2)
-build_year = col_y.number_input("製造年 (年)", min_value=1980, max_value=2026, value=2015)
-build_month = col_m.number_input("製造月 (月)", min_value=1, max_value=12, value=6)
-raws_permission = st.sidebar.checkbox("提携RAWs工場が Model Report の利用ライセンスを保有している", value=True)
+build_year = col_y.number_input("製造年 (年)", min_value=1980, max_value=2026, value=2022)
+build_month = col_m.number_input("製造月 (月)", min_value=1, max_value=12, value=4)
 run_clicked = st.sidebar.button("🔍 適合判定を実行", type="primary")
 if run_clicked:
     st.session_state.show_predictions = False
@@ -243,7 +242,6 @@ with st.sidebar.expander("⚙️ 詳細オプション・手動データ読込",
 
 moving_anim_class = "chara-step-active" if run_clicked else "chara-step-idle"
 
-# サイドバー下部（静止）
 if sprites.get("chiikawa"):
     st.sidebar.markdown(
         f'<div style="text-align:center;margin-top:20px;"><img src="{sprites["chiikawa"]}" class="chara-static" style="width:94px;border-radius:12px;" /></div>',
@@ -261,7 +259,6 @@ if uploaded_file:
 else:
     sev_df, badge_text = load_latest_sev_master()
 
-# 右上ヘッダー内（静止）
 usagi_html = f'<img src="{sprites["usagi"]}" class="chara-static" style="width:82px;border-radius:12px;margin-left:16px;" />' if sprites.get("usagi") else ""
 st.markdown(
     f'<div class="header-box"><div><div class="app-title">🚘 オーストラリア向け中古車輸出 適合判定システム</div><div class="master-badge"><span class="dot-green"></span>{badge_text}</div></div><div>{usagi_html}</div></div>',
@@ -311,12 +308,9 @@ else:
                 card_cls, box_cls, status_text, sub_note = "card-ng", "status-box-ng", "❌ 輸出不可（製造年月 対象外）", f"{build_year}年{build_month}月は対象期間外です。"
             elif is_expired:
                 card_cls, box_cls, status_text, sub_note = "card-warn", "status-box-warn", "⚠️ 要確認（SEV有効期限切れ）", f"有効期限 ({exp_str}) を過ぎています。"
-            elif not raws_permission:
-                card_cls, box_cls, status_text, sub_note = "card-warn", "status-box-warn", "⚠️ 判定保留（RAWsライセンス未確認）", "提携RAWs工場のMRE利用権限を確認してください。"
             else:
                 card_cls, box_cls, status_text, sub_note = "card-ok", "status-box-ok", "✅ SEVs適合（MRE要確認）", ""
 
-            # 右の上から2番目（判定ステータス内）：ここだけが動く
             hachi_html = f'<img src="{sprites["hachiware"]}" class="{moving_anim_class}" style="width:66px;border-radius:10px;margin-left:10px;" />' if sprites.get("hachiware") else ""
             f_disp = f_str if pd.notna(f_str) and f_str else "指定なし"
             t_disp = t_str if pd.notna(t_str) and t_str else "指定なし"
@@ -340,7 +334,6 @@ else:
                 )
                 components.html(html_button, height=68)
 
-        # データシート一覧（デフォルトで常時展開）＋ 右一番下のキャラクター（クリックで関連車種を予測）
         col_sheet, col_kuri = st.columns([5, 1])
         with col_sheet:
             with st.expander("📊 検索結果一覧（データシート）", expanded=True):
@@ -355,7 +348,6 @@ else:
             if st.button("🔮 関連車を予測", key="predict_btn", use_container_width=True):
                 st.session_state.show_predictions = not st.session_state.show_predictions
 
-        # 右一番下のキャラボタンを押したときの「関連車両AI予測パネル」
         if st.session_state.show_predictions:
             base_row = matched.iloc[0]
             base_make = str(base_row["メーカー"]).strip()
