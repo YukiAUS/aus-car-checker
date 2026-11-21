@@ -17,7 +17,7 @@ st.set_page_config(
 
 
 def remove_outer_bg_only(pil_img):
-    """画像の四隅から繋がっている外側背景（空色・白）のみを透明化し、キャラの顔・体の白さは絶対に透けさせない"""
+    """画像の四隅から繋がっている外側背景（空色・白）のみを透明化する"""
     img = pil_img.convert("RGBA")
     w, h = img.size
     pixels = img.load()
@@ -29,7 +29,6 @@ def remove_outer_bg_only(pil_img):
         is_white = (r > 242 and g > 242 and b > 242)
         return is_sky or is_white
 
-    # 外周のピクセルを起点にする
     for x in range(w):
         for y in (0, h - 1):
             r, g, b, _ = pixels[x, y]
@@ -44,7 +43,6 @@ def remove_outer_bg_only(pil_img):
                     queue.append((x, y))
                     visited.add((x, y))
 
-    # 外側から連続する背景領域だけを透過
     while queue:
         cx, cy = queue.popleft()
         pixels[cx, cy] = (255, 255, 255, 0)
@@ -154,8 +152,8 @@ CUSTOM_CSS = (
     ".status-box-ok { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
     ".status-box-warn { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
     ".status-box-ng { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; border-radius: 10px; padding: 10px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
-    ".kuri-card { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 2px; }"
-    ".kuri-img { width: 68px; height: 68px; object-fit: cover; border-radius: 14px; border: 2px solid #CBD5E1; box-shadow: 0 2px 6px rgba(0,0,0,0.08); background: #FFFFFF; }"
+    ".kuri-box { display: flex; flex-direction: column; align-items: center; justify-content: center; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 14px; padding: 10px 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }"
+    ".predict-panel { background: #FFFFFF; border: 1px solid #CBD5E1; border-left: 5px solid #3B82F6; border-radius: 12px; padding: 16px 20px; margin-top: 14px; box-shadow: 0 3px 10px rgba(15,23,42,0.04); }"
     "div.stButton > button[kind='primary'] { background-color: #2B4168; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; width: 100%; }"
     "</style>"
 )
@@ -164,6 +162,11 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 ROVER_SEVS_URL = "https://www.rover.infrastructure.gov.au/PublishedApprovals/SEVApprovals/"
 ROVER_MRE_URL = "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
 LEGACY_EXCEL_PATH = "AUS SEV早見表.xlsx"
+
+if "show_predictions" not in st.session_state:
+    st.session_state.show_predictions = False
+if "override_query" not in st.session_state:
+    st.session_state.override_query = None
 
 
 def read_sev_file(file_obj_or_path):
@@ -218,12 +221,19 @@ def parse_dmy(date_str):
 
 
 st.sidebar.markdown("### 🔍 車両・型式検索")
-input_query = st.sidebar.text_input("メーカー・車種名・型式・SEV番号", value="ZVW40").strip().upper()
+default_q = st.session_state.override_query if st.session_state.override_query else "ZVW40"
+raw_input = st.sidebar.text_input("メーカー・車種名・型式・SEV番号", value=default_q)
+if st.session_state.override_query and raw_input == st.session_state.override_query:
+    st.session_state.override_query = None
+input_query = raw_input.strip().upper()
+
 col_y, col_m = st.sidebar.columns(2)
 build_year = col_y.number_input("製造年 (年)", min_value=1980, max_value=2026, value=2015)
 build_month = col_m.number_input("製造月 (月)", min_value=1, max_value=12, value=6)
 raws_permission = st.sidebar.checkbox("提携RAWs工場が Model Report の利用ライセンスを保有している", value=True)
 run_clicked = st.sidebar.button("🔍 適合判定を実行", type="primary")
+if run_clicked:
+    st.session_state.show_predictions = False
 
 with st.sidebar.expander("⚙️ 詳細オプション・手動データ読込", expanded=False):
     if st.button("🔄 最新ファイルに再読み込み"):
@@ -231,7 +241,6 @@ with st.sidebar.expander("⚙️ 詳細オプション・手動データ読込",
         st.rerun()
     uploaded_file = st.file_uploader("手元のExcel / CSVで一時判定する場合", type=["xlsx", "xls", "csv"])
 
-# 右の上から2番目（判定ステータス内）だけが動くアニメーションクラス
 moving_anim_class = "chara-step-active" if run_clicked else "chara-step-idle"
 
 # サイドバー下部（静止）
@@ -252,7 +261,7 @@ if uploaded_file:
 else:
     sev_df, badge_text = load_latest_sev_master()
 
-# 右上ヘッダー内（静止・色抜けなし）
+# 右上ヘッダー内（静止）
 usagi_html = f'<img src="{sprites["usagi"]}" class="chara-static" style="width:82px;border-radius:12px;margin-left:16px;" />' if sprites.get("usagi") else ""
 st.markdown(
     f'<div class="header-box"><div><div class="app-title">🚘 オーストラリア向け中古車輸出 適合判定システム</div><div class="master-badge"><span class="dot-green"></span>{badge_text}</div></div><div>{usagi_html}</div></div>',
@@ -307,7 +316,7 @@ else:
             else:
                 card_cls, box_cls, status_text, sub_note = "card-ok", "status-box-ok", "✅ SEVs適合（MRE要確認）", ""
 
-            # 右の上から2番目（判定ステータス内）：ここだけが動く！
+            # 右の上から2番目（判定ステータス内）：ここだけが動く
             hachi_html = f'<img src="{sprites["hachiware"]}" class="{moving_anim_class}" style="width:66px;border-radius:10px;margin-left:10px;" />' if sprites.get("hachiware") else ""
             f_disp = f_str if pd.notna(f_str) and f_str else "指定なし"
             t_disp = t_str if pd.notna(t_str) and t_str else "指定なし"
@@ -331,14 +340,67 @@ else:
                 )
                 components.html(html_button, height=68)
 
-        # 右下（静止）
+        # データシート一覧（デフォルトで常時展開）＋ 右一番下のキャラクター（クリックで関連車種を予測）
         col_sheet, col_kuri = st.columns([5, 1])
         with col_sheet:
-            with st.expander("📊 検索結果一覧（データシート）", expanded=False):
+            with st.expander("📊 検索結果一覧（データシート）", expanded=True):
                 st.dataframe(matched, use_container_width=True)
+
         with col_kuri:
             if sprites.get("kurimanju"):
                 st.markdown(
-                    f'<div class="kuri-card"><img src="{sprites["kurimanju"]}" class="kuri-img chara-static" /></div>',
+                    f'<div class="kuri-box"><img src="{sprites["kurimanju"]}" class="chara-static" style="width:68px;border-radius:10px;margin-bottom:6px;" /></div>',
                     unsafe_allow_html=True,
                 )
+            if st.button("🔮 関連車を予測", key="predict_btn", use_container_width=True):
+                st.session_state.show_predictions = not st.session_state.show_predictions
+
+        # 右一番下のキャラボタンを押したときの「関連車両AI予測パネル」
+        if st.session_state.show_predictions:
+            base_row = matched.iloc[0]
+            base_make = str(base_row["メーカー"]).strip()
+            base_model_first = str(base_row["車種名"]).strip().split()[0]
+            base_cat = str(base_row["カテゴリ"]).strip()
+            matched_sevs = set(matched["SEV番号"].astype(str).str.strip())
+
+            others = sev_df[~sev_df["SEV番号"].astype(str).str.strip().isin(matched_sevs)].copy()
+
+            def score_related(r):
+                score = 0
+                r_make = str(r["メーカー"]).strip()
+                r_model = str(r["車種名"]).strip()
+                r_cat = str(r["カテゴリ"]).strip()
+                if r_make.upper() == base_make.upper():
+                    score += 3
+                if base_model_first.upper() in r_model.upper():
+                    score += 4
+                if r_cat == base_cat:
+                    score += 2
+                d_f = parse_my(r["製造開始年月"])
+                d_t = parse_my(r["製造終了年月"])
+                if (not d_f or target_date >= d_f) and (not d_t or target_date <= d_t):
+                    score += 2
+                return score
+
+            others["関連度"] = others.apply(score_related, axis=1)
+            related_df = others[others["関連度"] >= 3].sort_values(by=["関連度", "SEV番号"], ascending=[False, True]).head(8)
+
+            st.markdown(
+                f'<div class="predict-panel"><strong>🔮 「{base_make} {base_row["車種名"]}（{build_year}年{build_month}月）」から予測される関連SEVs対象車（上位{len(related_df)}件）</strong><div style="font-size:0.82rem;color:#64748B;margin-top:4px;">同メーカー・同シリーズ・同カテゴリ（{base_cat}）および同時期の適合候補を抽出しました。</div></div>',
+                unsafe_allow_html=True,
+            )
+
+            if related_df.empty:
+                st.info("条件に近い関連車種が見つかりませんでした。")
+            else:
+                disp_cols = ["SEV番号", "メーカー", "車種名", "カテゴリ", "型式", "製造開始年月", "製造終了年月", "有効期限"]
+                st.dataframe(related_df[disp_cols], use_container_width=True)
+
+                btn_cols = st.columns(min(4, len(related_df)))
+                for i, (_, r_row) in enumerate(related_df.head(4).iterrows()):
+                    r_sev = str(r_row["SEV番号"]).strip()
+                    r_label = f"👉 {r_row['車種名']} ({r_sev})"
+                    if btn_cols[i].button(r_label, key=f"jump_{r_sev}"):
+                        st.session_state.override_query = r_sev
+                        st.session_state.show_predictions = False
+                        st.rerun()
