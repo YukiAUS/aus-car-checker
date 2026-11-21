@@ -1,4 +1,5 @@
 import base64
+from collections import deque
 from datetime import datetime
 import glob
 from io import BytesIO
@@ -15,44 +16,60 @@ st.set_page_config(
 )
 
 
-def process_single_sprite(img_path):
-    img = Image.open(img_path).convert("RGBA")
+def remove_outer_bg_only(pil_img):
+    """画像の四隅から繋がっている外側背景（空色・白）のみを透明化し、キャラの顔・体の白さは絶対に透けさせない"""
+    img = pil_img.convert("RGBA")
     w, h = img.size
-    # 横長（3体並びの集合画像）だった場合は自動で3分割して返す
-    if w > h * 1.4:
-        new_data = []
-        for r, g, b, a in img.getdata():
-            if (b > 210 and g > 190 and r < 185 and (b - r) > 35) or (r > 246 and g > 246 and b > 246):
-                new_data.append((255, 255, 255, 0))
-            else:
-                new_data.append((r, g, b, a))
-        img.putdata(new_data)
-        boxes = [(0, 0, int(w * 0.34), h), (int(w * 0.33), 0, int(w * 0.67), h), (int(w * 0.66), 0, w, h)]
-        out = []
-        for box in boxes:
-            c = img.crop(box)
-            bb = c.getbbox()
-            if bb:
-                c = c.crop(bb)
-            buf = BytesIO()
-            c.save(buf, format="PNG")
-            out.append("data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8"))
-        return out
+    pixels = img.load()
+    visited = set()
+    queue = deque()
 
-    # 単体画像の場合は背景の白・水色を透過して整形
-    new_data = []
-    for r, g, b, a in img.getdata():
-        if (b > 210 and g > 190 and r < 185 and (b - r) > 35) or (r > 244 and g > 244 and b > 244):
-            new_data.append((255, 255, 255, 0))
-        else:
-            new_data.append((r, g, b, a))
-    img.putdata(new_data)
+    def is_bg_color(r, g, b):
+        is_sky = (b > 205 and g > 185 and r < 190 and (b - r) > 30)
+        is_white = (r > 242 and g > 242 and b > 242)
+        return is_sky or is_white
+
+    # 外周のピクセルを起点にする
+    for x in range(w):
+        for y in (0, h - 1):
+            r, g, b, _ = pixels[x, y]
+            if is_bg_color(r, g, b):
+                queue.append((x, y))
+                visited.add((x, y))
+    for y in range(h):
+        for x in (0, w - 1):
+            if (x, y) not in visited:
+                r, g, b, _ = pixels[x, y]
+                if is_bg_color(r, g, b):
+                    queue.append((x, y))
+                    visited.add((x, y))
+
+    # 外側から連続する背景領域だけを透過
+    while queue:
+        cx, cy = queue.popleft()
+        pixels[cx, cy] = (255, 255, 255, 0)
+        for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in visited:
+                r, g, b, _ = pixels[nx, ny]
+                if is_bg_color(r, g, b):
+                    visited.add((nx, ny))
+                    queue.append((nx, ny))
+
     bb = img.getbbox()
     if bb:
         img = img.crop(bb)
     buf = BytesIO()
     img.save(buf, format="PNG")
-    return ["data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")]
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def process_single_sprite(img_path):
+    img = Image.open(img_path).convert("RGBA")
+    w, h = img.size
+    if w > h * 1.4:
+        boxes = [(0, 0, int(w * 0.34), h), (int(w * 0.33), 0, int(w * 0.67), h), (int(w * 0.66), 0, w, h)]
+        return [remove_outer_bg_only(img.crop(box)) for box in boxes]
+    return [remove_outer_bg_only(img)]
 
 
 @st.cache_data(show_spinner=False)
@@ -66,7 +83,6 @@ def load_all_four_characters():
     if not all_imgs:
         return {}
 
-    # ファイル名にキャラ名が含まれている場合は優先的にマッピング
     assigned = {}
     remaining_sprites = []
 
@@ -94,7 +110,6 @@ def load_all_four_characters():
         except Exception:
             continue
 
-    # 未割り当ての枠に、読み込んだ画像を順番にすべて埋める（4つ全部使う）
     for slot in ["usagi", "hachiware", "chiikawa", "kurimanju"]:
         if slot not in assigned and remaining_sprites:
             assigned[slot] = remaining_sprites.pop(0)
@@ -124,6 +139,7 @@ CUSTOM_CSS = (
     "}"
     ".chara-step-idle { transform-origin: bottom center; animation: footStepIdle 2.2s ease-in-out infinite; display: inline-block; }"
     ".chara-step-active { transform-origin: bottom center; animation: footStepActive 0.65s ease-in-out 5, footStepIdle 2.2s ease-in-out 3.3s infinite; display: inline-block; }"
+    ".chara-static { display: inline-block; }"
     ".header-box { display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #2B4168 0%, #3B5984 100%); padding: 16px 26px; border-radius: 14px; box-shadow: 0 4px 12px rgba(15,23,42,0.08); margin-bottom: 18px; }"
     ".app-title { font-size: 1.45rem; font-weight: 700; color: #FFFFFF; margin: 0 0 8px 0; }"
     ".master-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.95); color: #1E293B; font-size: 0.8rem; font-weight: 600; padding: 4px 12px; border-radius: 999px; }"
@@ -215,12 +231,13 @@ with st.sidebar.expander("⚙️ 詳細オプション・手動データ読込",
         st.rerun()
     uploaded_file = st.file_uploader("手元のExcel / CSVで一時判定する場合", type=["xlsx", "xls", "csv"])
 
-anim_class = "chara-step-active" if run_clicked else "chara-step-idle"
+# 右の上から2番目（判定ステータス内）だけが動くアニメーションクラス
+moving_anim_class = "chara-step-active" if run_clicked else "chara-step-idle"
 
-# 3体目（ちいかわ）：サイドバー下部に配置
+# サイドバー下部（静止）
 if sprites.get("chiikawa"):
     st.sidebar.markdown(
-        f'<div style="text-align:center;margin-top:20px;"><img src="{sprites["chiikawa"]}" class="{anim_class}" style="width:94px;border-radius:12px;" /></div>',
+        f'<div style="text-align:center;margin-top:20px;"><img src="{sprites["chiikawa"]}" class="chara-static" style="width:94px;border-radius:12px;" /></div>',
         unsafe_allow_html=True,
     )
 
@@ -235,8 +252,8 @@ if uploaded_file:
 else:
     sev_df, badge_text = load_latest_sev_master()
 
-# 1体目（うさぎ）：メインヘッダー右上に配置
-usagi_html = f'<img src="{sprites["usagi"]}" class="{anim_class}" style="width:82px;border-radius:12px;margin-left:16px;" />' if sprites.get("usagi") else ""
+# 右上ヘッダー内（静止・色抜けなし）
+usagi_html = f'<img src="{sprites["usagi"]}" class="chara-static" style="width:82px;border-radius:12px;margin-left:16px;" />' if sprites.get("usagi") else ""
 st.markdown(
     f'<div class="header-box"><div><div class="app-title">🚘 オーストラリア向け中古車輸出 適合判定システム</div><div class="master-badge"><span class="dot-green"></span>{badge_text}</div></div><div>{usagi_html}</div></div>',
     unsafe_allow_html=True,
@@ -290,8 +307,8 @@ else:
             else:
                 card_cls, box_cls, status_text, sub_note = "card-ok", "status-box-ok", "✅ SEVs適合（MRE要確認）", ""
 
-            # 2体目（ハチワレ）：判定ステータス右端に配置
-            hachi_html = f'<img src="{sprites["hachiware"]}" class="{anim_class}" style="width:66px;border-radius:10px;margin-left:10px;" />' if sprites.get("hachiware") else ""
+            # 右の上から2番目（判定ステータス内）：ここだけが動く！
+            hachi_html = f'<img src="{sprites["hachiware"]}" class="{moving_anim_class}" style="width:66px;border-radius:10px;margin-left:10px;" />' if sprites.get("hachiware") else ""
             f_disp = f_str if pd.notna(f_str) and f_str else "指定なし"
             t_disp = t_str if pd.notna(t_str) and t_str else "指定なし"
             exp_disp = exp_str if pd.notna(exp_str) and exp_str else "期限設定なし"
@@ -314,7 +331,7 @@ else:
                 )
                 components.html(html_button, height=68)
 
-        # 4体目（くりまんじゅう）：データシート一覧の右横に配置
+        # 右下（静止）
         col_sheet, col_kuri = st.columns([5, 1])
         with col_sheet:
             with st.expander("📊 検索結果一覧（データシート）", expanded=False):
@@ -322,6 +339,6 @@ else:
         with col_kuri:
             if sprites.get("kurimanju"):
                 st.markdown(
-                    f'<div class="kuri-card"><img src="{sprites["kurimanju"]}" class="kuri-img {anim_class}" /></div>',
+                    f'<div class="kuri-card"><img src="{sprites["kurimanju"]}" class="kuri-img chara-static" /></div>',
                     unsafe_allow_html=True,
                 )
