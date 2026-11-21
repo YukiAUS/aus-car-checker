@@ -1,4 +1,5 @@
 from datetime import datetime
+import html
 import os
 import re
 import bs4
@@ -41,39 +42,49 @@ st.markdown(
 )
 
 st.markdown("### 🚘 🚜 オーストラリア向け中古車輸出 適合判定システム 🦘🐨 🐥🐶")
-st.caption("ROVER公式【SEVs登録全車種】×【Model Report承認リスト】自動統合判定ツール")
+st.caption("ROVER公式【SEVs登録全車種】×【Model Report承認リスト】リアルタイム自動統合判定ツール")
 
-# 正しい公式URLおよびバックアップファイル設定
+# 公式URLおよびバックアップファイル設定
 ROVER_SEVS_URL = "https://www.rover.infrastructure.gov.au/PublishedApprovals/SEVApprovals/"
 ROVER_SEV_DETAIL_BASE = "https://www.rover.infrastructure.gov.au/PublishedApprovals/SEVDetails/?id="
 ROVER_MRE_URL = "https://www.rover.infrastructure.gov.au/PublishedApprovals/MREApprovals/"
 BACKUP_EXCEL_PATH = "AUS SEV早見表.xlsx"
 
 
-# 共通：Power Apps Portal の EntityList API から全ページ分を漏れなく取得する関数
+# 共通：Power Apps Portal の HTMLからセキュリティキーを抽出し、APIで最新データを取得する関数
 def fetch_all_rover_records(page_url, search_text="", page_size=100, fetch_all_pages=True):
     session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-AU,en;q=0.9,ja;q=0.8",
     }
     try:
-        resp = session.get(page_url, headers=headers, timeout=15)
+        resp = session.get(page_url, headers=headers, timeout=20)
         if resp.status_code != 200:
-            return False, f"HTTP {resp.status_code}"
+            return False, f"ROVER接続エラー (HTTP {resp.status_code})"
 
-        soup = bs4.BeautifulSoup(resp.text, "html.parser")
+        # HTMLエンティティ(&quot;など)をデコードして内部設定JSONを抽出可能にする
+        raw_html = resp.text
+        decoded_html = html.unescape(raw_html)
+        soup = bs4.BeautifulSoup(raw_html, "html.parser")
+
+        # 1. CSRFトークンの抽出
         token_input = soup.find("input", {"name": "__RequestVerificationToken"})
         token = token_input["value"] if token_input else ""
 
-        api_match = re.search(r'/_services/entity-grid-data\.json/[a-zA-Z0-9\-]+', resp.text)
+        # 2. APIエンドポイントの抽出
+        api_match = re.search(r'/_services/entity-grid-data\.json/[0-9a-fA-F\-]{36}', decoded_html)
         if not api_match:
-            return False, "エンドポイント未検出"
-
+            return False, "ROVERのAPIエンドポイントが見つかりませんでした"
         api_url = "https://www.rover.infrastructure.gov.au" + api_match.group(0)
-        view_match = re.search(r'"Id"\s*:\s*"([0-9a-fA-F\-]{36})"', resp.text)
-        view_id = view_match.group(1) if view_match else ""
+
+        # 3. 必須の Base64SecureConfiguration と ViewId を抽出
+        secure_cfg_match = re.search(r'"Base64SecureConfiguration"\s*:\s*"([^"]+)"', decoded_html)
+        secure_cfg = secure_cfg_match.group(1) if secure_cfg_match else ""
+
+        view_id_match = re.search(r'"Id"\s*:\s*"([0-9a-fA-F\-]{36})"', decoded_html)
+        view_id = view_id_match.group(1) if view_id_match else ""
 
         api_headers = {
             "User-Agent": headers["User-Agent"],
@@ -88,11 +99,11 @@ def fetch_all_rover_records(page_url, search_text="", page_size=100, fetch_all_p
 
         all_records = []
         current_page = 1
-        max_pages = 20  # 無限ループ防止用安全上限（100件×20=2000件まで対応）
+        max_pages = 25
 
         while current_page <= max_pages:
             payload = {
-                "base64SecureConfiguration": "",
+                "base64SecureConfiguration": secure_cfg,
                 "search": search_text,
                 "page": current_page,
                 "pageSize": page_size,
@@ -108,9 +119,14 @@ def fetch_all_rover_records(page_url, search_text="", page_size=100, fetch_all_p
             if api_resp.status_code != 200:
                 if all_records:
                     break
-                return False, f"API Status {api_resp.status_code}"
+                return False, f"ROVER API応答エラー (HTTP {api_resp.status_code})"
 
-            data = api_resp.json()
+            # JSONとして解析できるか検証
+            try:
+                data = api_resp.json()
+            except Exception:
+                return False, "ROVERからJSON以外の応答が返されました（アクセス制限の可能性）"
+
             records = data.get("Records", [])
             total_count = data.get("TotalRecordCount", 0)
 
@@ -126,18 +142,22 @@ def fetch_all_rover_records(page_url, search_text="", page_size=100, fetch_all_p
 
         return True, all_records
     except Exception as e:
-        return False, str(e)
+        return False, f"通信エラー: {str(e)}"
 
 
-# 1. SEVs全車種データの自動取得（ROVER公式 SEVApprovals 全件取得 ➔ 失敗時はExcelバックアップ）
-@st.cache_data(ttl=3600, show_spinner=False)
+# 1. SEVs全車種データの自動取得（常にROVER公式 SEVApprovals から最新を取得）
+@st.cache_data(ttl=1800, show_spinner=False)
 def load_sevs_master():
-    ok, records = fetch_all_rover_records(ROVER_SEVS_URL, search_text="", page_size=100, fetch_all_pages=True)
-    if ok and records:
+    ok, result = fetch_all_rover_records(ROVER_SEVS_URL, search_text="", page_size=100, fetch_all_pages=True)
+    if ok and isinstance(result, list) and len(result) > 0:
         rows = []
-        for rec in records:
+        for rec in result:
             rec_id = rec.get("Id", "")
-            attrs = {a["Name"]: a.get("DisplayValue", a.get("Value", "")) for a in rec.get("Attributes", [])}
+            attrs = {}
+            for a in rec.get("Attributes", []):
+                val = a.get("DisplayValue") if a.get("DisplayValue") not in [None, ""] else a.get("Value", "")
+                attrs[a["Name"]] = val
+
             rows.append({
                 "SEV番号": attrs.get("gov_sevnumber", attrs.get("gov_approvalnumber", "")),
                 "メーカー": attrs.get("gov_make", ""),
@@ -152,9 +172,10 @@ def load_sevs_master():
             })
         df = pd.DataFrame(rows)
         if not df.empty and df["SEV番号"].astype(str).str.contains("SEV-").any():
-            return df, f"🌐 ROVER公式SEVApprovals（全{len(df)}車種リアルタイム同期）", datetime.now().strftime("%Y/%m/%d %H:%M")
+            return df, f"🌐 ROVER公式SEVApprovals（最新・全{len(df)}車種を直接取得）", datetime.now().strftime("%Y/%m/%d %H:%M"), ""
 
-    # フォールバック：リポジトリ内のExcelから読み込み
+    # 取得できなかった場合のエラー詳細を保持しつつ、緊急バックアップExcelを読み込む
+    err_reason = result if not ok else "レコードが0件でした"
     if os.path.exists(BACKUP_EXCEL_PATH):
         try:
             df = pd.read_excel(BACKUP_EXCEL_PATH, skiprows=1).iloc[:, :8]
@@ -170,21 +191,25 @@ def load_sevs_master():
             ]
             df["見直し中"] = ""
             df["詳細ID"] = ""
-            return df.dropna(subset=["SEV番号"]), f"📁 バックアップExcel（全{len(df)}件）", "ローカル保存版"
+            return df.dropna(subset=["SEV番号"]), f"📁 バックアップExcel（全{len(df)}件）", "ローカル保存版", err_reason
         except Exception:
             pass
 
-    return None, "データ取得エラー", ""
+    return None, "データ取得エラー", "", err_reason
 
 
 # 2. Model Report (MRE) の自動照会
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_mre_for_sev(sev_no):
-    ok, records = fetch_all_rover_records(ROVER_MRE_URL, search_text=sev_no, page_size=50, fetch_all_pages=False)
-    if ok:
+    ok, result = fetch_all_rover_records(ROVER_MRE_URL, search_text=sev_no, page_size=50, fetch_all_pages=False)
+    if ok and isinstance(result, list):
         parsed_list = []
-        for rec in records:
-            attrs = {a["Name"]: a.get("DisplayValue", a.get("Value", "")) for a in rec.get("Attributes", [])}
+        for rec in result:
+            attrs = {}
+            for a in rec.get("Attributes", []):
+                val = a.get("DisplayValue") if a.get("DisplayValue") not in [None, ""] else a.get("Value", "")
+                attrs[a["Name"]] = val
+
             parsed_list.append({
                 "MRE番号": attrs.get("gov_approvalnumber", ""),
                 "メーカー": attrs.get("gov_make", ""),
@@ -194,7 +219,7 @@ def fetch_mre_for_sev(sev_no):
                 "適合レベル": attrs.get("gov_compliancelevel", ""),
             })
         return True, parsed_list
-    return False, records
+    return False, result
 
 
 # 日付変換ユーティリティ
@@ -252,6 +277,7 @@ uploaded_file = st.sidebar.file_uploader(
 
 # --- メイン判定処理 ---
 if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary"):
+    err_detail = ""
     if uploaded_file:
         try:
             sev_df = pd.read_excel(uploaded_file, skiprows=1).iloc[:, :8]
@@ -273,15 +299,17 @@ if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary
             st.error(f"ファイルの読み込みに失敗しました: {e}")
             sev_df = None
     else:
-        with st.spinner("📡 ROVER公式SEVApprovalsから全登録車種データを取得中..."):
-            sev_df, source_label, sync_time = load_sevs_master()
+        with st.spinner("📡 ROVER公式サイトから最新の全登録車種データを取得中..."):
+            sev_df, source_label, sync_time, err_detail = load_sevs_master()
 
     if sev_df is None:
-        st.error("❌ SEVsデータの取得に失敗しました。バックアップExcelを配置するか手動アップロードしてください。")
+        st.error(f"❌ SEVsデータの取得に失敗しました。（詳細: {err_detail}）")
     elif not input_query:
         st.warning("メーカー・車種名・型式・SEV番号のいずれかを入力してください。")
     else:
         st.caption(f"📡 情報源: **{source_label}** （取得時刻: {sync_time}）")
+        if err_detail:
+            st.warning(f"⚠️ ROVER公式からの直接取得が一時的に制限されたためバックアップを使用中です（理由: {err_detail}）")
 
         target_date = datetime(build_year, build_month, 1)
         today = datetime.now()
@@ -339,100 +367,4 @@ if st.sidebar.button("🚙 適合判定を実行する 💨 🦘", type="primary
                     mre_ok, mre_result = fetch_mre_for_sev(sev_no)
 
                 has_active_mre = False
-                if mre_ok and isinstance(mre_result, list) and len(mre_result) > 0:
-                    has_active_mre = any("In Force" in str(m.get("ステータス", "")) for m in mre_result)
-
-                with st.expander(
-                    f"🚜 **SEV Code: {sev_no}** | {make} {model} ({model_code}) 🐨🐾",
-                    expanded=True,
-                ):
-                    c1, c2 = st.columns([2, 1])
-
-                    with c1:
-                        st.markdown(f"**① SEVs登録情報（公式レジスター）**")
-                        st.markdown(f"- **メーカー / 車種:** {make} {model} （型式: `{model_code}`）")
-                        st.markdown(
-                            f"- **対象製造期間:** {f_str if pd.notna(f_str) and f_str else '指定なし'} 〜 "
-                            f"{t_str if pd.notna(t_str) and t_str else '指定なし'}"
-                        )
-                        st.markdown(
-                            f"- **SEV有効期限:** {exp_str if pd.notna(exp_str) and exp_str else '期限設定なし'}"
-                        )
-                        if under_review.upper() == "YES":
-                            st.warning("⚠️ **Under review（見直し中）:** 現在オーストラリア政府により登録内容の見直しが行われています。")
-
-                        sev_page_url = f"{ROVER_SEV_DETAIL_BASE}{detail_id}" if detail_id and detail_id != "nan" else ROVER_SEVS_URL
-                        st.markdown(f"📄 [ROVER公式【SEV詳細ページ】で適用基準・グレードを確認する ↗️]({sev_page_url})")
-
-                    with c2:
-                        st.markdown(f"**② 総合輸出判定**")
-                        if not in_range:
-                            st.error("❌ 輸出不可（製造年月 対象外） 😿")
-                            st.caption(f"{build_year}年{build_month}月は対象期間外です。")
-                        elif is_expired:
-                            st.warning("⚠️ 要確認（SEV有効期限切れ） 🙀")
-                            st.caption(f"有効期限 ({exp_str}) が過ぎています。")
-                        elif mre_ok and has_active_mre and raws_permission:
-                            st.success("✅ 輸出可能（SEVs・MRE共に有効） 🎊 🦘")
-                        elif mre_ok and not has_active_mre:
-                            st.error("❌ 輸出不可（有効なMREなし） 😿")
-                            st.caption("SEV適合ですが、有効(In Force)なModel Reportがありません。")
-                        elif not raws_permission:
-                            st.warning("⚠️ 判定保留（RAWsライセンス未確認） 🐱")
-                        else:
-                            st.success("✅ SEVs適合（MRE要確認） 🐨")
-
-                        html_button = f"""
-                        <div style="width: 100%; text-align: center; margin-top: 6px;">
-                            <button onclick="copyAndOpen()" style="
-                                background-color: #FF4B4B;
-                                color: white;
-                                border: none;
-                                padding: 10px 14px;
-                                font-size: 13px;
-                                font-weight: bold;
-                                border-radius: 8px;
-                                cursor: pointer;
-                                width: 100%;
-                                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                            ">
-                                🔗 {sev_no} をコピーしてMREを開く ↗️ 🐨
-                            </button>
-                        </div>
-                        <script>
-                        function copyAndOpen() {{
-                            if (navigator.clipboard && window.isSecureContext) {{
-                                navigator.clipboard.writeText("{sev_no}").then(function() {{
-                                    window.open("{ROVER_MRE_URL}", "_blank");
-                                }}).catch(function(err) {{
-                                    window.open("{ROVER_MRE_URL}", "_blank");
-                                }});
-                            }} else {{
-                                var textArea = document.createElement("textarea");
-                                textArea.value = "{sev_no}";
-                                document.body.appendChild(textArea);
-                                textArea.select();
-                                try {{
-                                    document.execCommand('copy');
-                                }} catch (err) {{}}
-                                document.body.removeChild(textArea);
-                                window.open("{ROVER_MRE_URL}", "_blank");
-                            }}
-                        }}
-                        </script>
-                        """
-                        components.html(html_button, height=55)
-                        st.caption("※開いたら検索窓で貼り付け (Ctrl+V / 長押し)")
-
-                    # ③ Model Report (MRE) 照会結果セクション
-                    if auto_check_rover:
-                        if mre_ok and isinstance(mre_result, list):
-                            st.markdown(f"**③ ROVER公式【Model Report】照合結果（{len(mre_result)}件ヒット）**")
-                            st.dataframe(pd.DataFrame(mre_result), use_container_width=True)
-                        else:
-                            st.caption(f"ℹ️ Model Report 自動照会メモ: {mre_result}（上の赤いボタンから直接確認できます）")
-
-            st.markdown("---")
-            st.subheader("📊 検索結果一覧（データシート） 🐨🦘🐰")
-            display_cols = [c for c in matched.columns if c != "詳細ID"]
-            st.dataframe(matched[display_cols], use_container_width=True)
+                if mre_ok and isinstance(mre_result, list) and len(mre_result) >
