@@ -15,46 +15,77 @@ st.set_page_config(
 )
 
 
+def image_to_b64(pil_img):
+    buf = BytesIO()
+    pil_img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
 @st.cache_data(show_spinner=False)
 def prepare_character_sprites():
-    img_candidates = []
+    all_imgs = []
     for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
         for f in glob.glob(ext):
-            if "char" in f.lower() or "image_bb" in f.lower():
-                img_candidates.append(f)
-    if not img_candidates:
-        all_imgs = glob.glob("*.jpg") + glob.glob("*.jpeg") + glob.glob("*.png")
-        img_candidates = [f for f in all_imgs if not f.startswith("AUS_SEV")]
-    if not img_candidates:
+            if not f.startswith("AUS_SEV"):
+                all_imgs.append(f)
+
+    if not all_imgs:
         return None
-    try:
-        img = Image.open(img_candidates[0]).convert("RGBA")
-        w, h = img.size
-        new_data = []
-        for r, g, b, a in img.getdata():
-            if (b > 210 and g > 190 and r < 185 and (b - r) > 35) or (r > 246 and g > 246 and b > 246):
-                new_data.append((255, 255, 255, 0))
-            else:
-                new_data.append((r, g, b, a))
-        img.putdata(new_data)
-        boxes = [
-            (0, 0, int(w * 0.34), h),
-            (int(w * 0.33), 0, int(w * 0.67), h),
-            (int(w * 0.66), 0, w, h),
-        ]
-        sprites = []
-        for box in boxes:
-            cropped = img.crop(box)
-            bbox = cropped.getbbox()
-            if bbox:
-                cropped = cropped.crop(bbox)
-            buf = BytesIO()
-            cropped.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-            sprites.append("data:image/png;base64," + b64)
-        return {"hachiware": sprites[0], "chiikawa": sprites[1], "usagi": sprites[2]}
-    except Exception:
-        return None
+
+    trio_file = None
+    fourth_file = None
+
+    # アスペクト比（横長＝3体並び画像、正方形に近い＝4体目くりまんじゅう）で自動判別
+    for f in sorted(all_imgs):
+        try:
+            with Image.open(f) as im:
+                w, h = im.size
+                if w > h * 1.4 and trio_file is None:
+                    trio_file = f
+                elif w <= h * 1.4 and fourth_file is None:
+                    fourth_file = f
+        except Exception:
+            continue
+
+    result = {}
+
+    # 1. 3体並び画像（ハチワレ・ちいかわ・うさぎ）の自動分割＆背景透過
+    if trio_file:
+        try:
+            img = Image.open(trio_file).convert("RGBA")
+            w, h = img.size
+            new_data = []
+            for r, g, b, a in img.getdata():
+                if (b > 210 and g > 190 and r < 185 and (b - r) > 35) or (r > 246 and g > 246 and b > 246):
+                    new_data.append((255, 255, 255, 0))
+                else:
+                    new_data.append((r, g, b, a))
+            img.putdata(new_data)
+
+            boxes = [
+                (0, 0, int(w * 0.34), h),
+                (int(w * 0.33), 0, int(w * 0.67), h),
+                (int(w * 0.66), 0, w, h),
+            ]
+            names = ["hachiware", "chiikawa", "usagi"]
+            for name, box in zip(names, boxes):
+                cropped = img.crop(box)
+                bbox = cropped.getbbox()
+                if bbox:
+                    cropped = cropped.crop(bbox)
+                result[name] = image_to_b64(cropped)
+        except Exception:
+            pass
+
+    # 2. 4体目画像（くりまんじゅう）の読み込み＆角丸カード用整形
+    if fourth_file:
+        try:
+            img4 = Image.open(fourth_file).convert("RGBA")
+            result["kurimanju"] = image_to_b64(img4)
+        except Exception:
+            pass
+
+    return result if result else None
 
 
 sprites = prepare_character_sprites()
@@ -79,9 +110,9 @@ CUSTOM_CSS = (
     "}"
     ".chara-step-idle { transform-origin: bottom center; animation: footStepIdle 2.2s ease-in-out infinite; display: inline-block; }"
     ".chara-step-active { transform-origin: bottom center; animation: footStepActive 0.65s ease-in-out 5, footStepIdle 2.2s ease-in-out 3.3s infinite; display: inline-block; }"
-    ".header-box { display: flex; align-items: center; justify-content: space-between; background: #FFFFFF; padding: 18px 24px; border-radius: 14px; border: 1px solid #E2E8F0; box-shadow: 0 2px 8px rgba(15,23,42,0.04); margin-bottom: 18px; }"
-    ".app-title { font-size: 1.4rem; font-weight: 700; color: #0F172A; margin: 0 0 6px 0; }"
-    ".master-badge { display: inline-flex; align-items: center; gap: 6px; background: #F1F5F9; color: #334155; font-size: 0.8rem; font-weight: 600; padding: 4px 12px; border-radius: 999px; border: 1px solid #CBD5E1; }"
+    ".header-box { display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, #2B4168 0%, #3B5984 100%); padding: 18px 26px; border-radius: 14px; box-shadow: 0 4px 12px rgba(15,23,42,0.08); margin-bottom: 18px; }"
+    ".app-title { font-size: 1.45rem; font-weight: 700; color: #FFFFFF; margin: 0 0 8px 0; }"
+    ".master-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.95); color: #1E293B; font-size: 0.8rem; font-weight: 600; padding: 4px 12px; border-radius: 999px; }"
     ".dot-green { width: 8px; height: 8px; background-color: #10B981; border-radius: 50%; display: inline-block; }"
     ".result-card { background: #FFFFFF; border-radius: 14px; padding: 20px 24px; margin-bottom: 16px; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(15,23,42,0.05); }"
     ".card-ok { border-left: 6px solid #10B981; }"
@@ -93,7 +124,9 @@ CUSTOM_CSS = (
     ".status-box-ok { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
     ".status-box-warn { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
     ".status-box-ng { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; border-radius: 10px; padding: 12px 14px; font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; justify-content: space-between; }"
-    "div.stButton > button[kind='primary'] { background-color: #1E293B; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; width: 100%; }"
+    ".kuri-card { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }"
+    ".kuri-img { width: 64px; height: 64px; object-fit: cover; border-radius: 12px; border: 2px solid #E2E8F0; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }"
+    "div.stButton > button[kind='primary'] { background-color: #2B4168; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; width: 100%; }"
     "</style>"
 )
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -170,9 +203,10 @@ with st.sidebar.expander("⚙️ 詳細オプション・手動データ読込",
 
 anim_class = "chara-step-active" if run_clicked else "chara-step-idle"
 
+# サイドバー下部：和装ちいかわ
 if sprites and sprites.get("chiikawa"):
     st.sidebar.markdown(
-        f'<div style="text-align:center;margin-top:24px;"><img src="{sprites["chiikawa"]}" class="{anim_class}" style="width:96px;" /></div>',
+        f'<div style="text-align:center;margin-top:20px;"><img src="{sprites["chiikawa"]}" class="{anim_class}" style="width:94px;" /></div>',
         unsafe_allow_html=True,
     )
 
@@ -187,7 +221,8 @@ if uploaded_file:
 else:
     sev_df, badge_text = load_latest_sev_master()
 
-usagi_html = f'<img src="{sprites["usagi"]}" class="{anim_class}" style="width:78px;margin-left:16px;" />' if (sprites and sprites.get("usagi")) else ""
+# メインヘッダー（左の犬はなし・右上にパイロットうさぎのみ）
+usagi_html = f'<img src="{sprites["usagi"]}" class="{anim_class}" style="width:82px;margin-left:16px;" />' if (sprites and sprites.get("usagi")) else ""
 st.markdown(
     f'<div class="header-box"><div><div class="app-title">🚘 オーストラリア向け中古車輸出 適合判定システム</div><div class="master-badge"><span class="dot-green"></span>{badge_text}</div></div><div>{usagi_html}</div></div>',
     unsafe_allow_html=True,
@@ -264,5 +299,14 @@ else:
                 )
                 components.html(html_button, height=68)
 
-        with st.expander("📊 検索結果一覧（データシート）", expanded=False):
-            st.dataframe(matched, use_container_width=True)
+        # 4体目（くりまんじゅう）をデータシート一覧の右横に配置
+        col_sheet, col_kuri = st.columns([5, 1])
+        with col_sheet:
+            with st.expander("📊 検索結果一覧（データシート）", expanded=False):
+                st.dataframe(matched, use_container_width=True)
+        with col_kuri:
+            if sprites and sprites.get("kurimanju"):
+                st.markdown(
+                    f'<div class="kuri-card"><img src="{sprites["kurimanju"]}" class="kuri-img {anim_class}" /></div>',
+                    unsafe_allow_html=True,
+                )
